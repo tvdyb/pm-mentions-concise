@@ -1,0 +1,814 @@
+{
+  "KXEARNINGSMENTIONVZ": {
+    "base_rate": 0.5,
+    "n_markets": 10
+  },
+  "KXMLBMENTION": {
+    "base_rate": 0.53125,
+    "n_markets": 64
+  },
+  "KX60MINMENTION": {
+    "base_rate": 0.397059,
+    "n_markets": 68
+  },
+  "KXEARNINGSMENTIONCVNA": {
+    "base_rate": 0.4,
+    "n_markets": 10
+  },
+  "KXTHEWEEKNIGHTMENTION": {
+    "base_rate": 0.424242,
+    "n_markets": 99
+  },
+  "KXEARNINGSMENTIONCRCL": {
+    "base_rate": 0.705882,
+    "n_markets": 17
+  },
+  "KXEARNINGSMENTIONRDDT": {
+    "base_rate": 0.619048,
+    "n_markets": 21
+  },
+  "KXVIEWMENTION": {
+    "base_rate": 0.2,
+    "n_markets": 10
+  },
+  "KXEARNINGSMENTIONQCOM": {
+    "base_rate": 0.666667,
+    "n_markets": 12
+  },
+  "KXEARNINGSMENTIONMA": {
+    "base_rate": 0.583333,
+    "n_markets": 12
+  },
+  "KXMAHERMENTION": {
+    "base_rate": 0.454545,
+    "n_markets": 22
+  },
+  "KXARMSTRONGMENTION": {
+    "base_rate": 0.291667,
+    "n_markets": 24
+  },
+  "KXEARNINGSMENTIONHD": {
+    "base_rate": 0.545455,
+    "n_markets": 22
+  },
+  "KXAMODEIMENTION": {
+    "base_rate": 0.666667,
+    "n_markets": 12
+  },
+  "KXTRUMPMENTIONB": {
+    "base_rate": 0.465555,
+    "n_markets": 1379
+  },
+  "KXEARNINGSMENTIONCAR": {
+    "base_rate": 0.6,
+    "n_markets": 10
+  },
+  "KXREEVESMENTION": {
+    "base_rate": 0.25,
+    "n_markets": 12
+  },
+  "KXKARPMENTION": {
+    "base_rate": 0.25,
+    "n_markets": 12
+  },
+  "KXCUOMOMENTION": {
+    "base_rate": 0.45,
+    "n_markets": 20
+  },
+  "KXEARNINGSMENTIONLYFT": {
+    "base_rate": 0.625,
+    "n_markets": 24
+  },
+  "KXEARNINGSMENTIONAMZN": {
+    "base_rate": 0.597403,
+    "n_markets": 77
+  },
+  "KXEARNINGSMENTIONACI": {
+    "base_rate": 0.615385,
+    "n_markets": 13
+  },
+  "KXCULTUREMENTION": {
+    "base_rate": 0.375,
+    "n_markets": 8
+  },
+  "KXEARNINGSMENTIONSHOP": {
+    "base_rate": 0.625,
+    "n_markets": 8
+  },
+  "KXEARNINGSMENTIONMSFT": {
+    "base_rate": 0.681159,
+    "n_markets": 69
+  },
+  "KXSCHUMERMENTION": {
+    "base_rate": 0.2,
+    "n_markets": 20
+  },
+  "KXPAULMENTION": {
+    "base_rate": 0.045455,
+    "n_markets": 22
+  },
+  "KXCMAMENTION": {
+    "base_rate": 0.285714,
+    "n_markets": 14
+  },
+  "KXPOLITICSMENTION": {
+    "base_rate": 0.471338,
+    "n_markets": 157
+  },
+  "KXEARNINGSMENTIONORCL": {
+    "base_rate": 0.37037,
+    "n_markets": 27
+  },
+  "KXNCAABMENTION": {
+    "base_rate": 0.478659,
+    "n_markets": 984
+  },
+  "KXLEAVITTSMFMENTION": {
+    "base_rate": 0.277778,
+    "n_markets": 54
+  },
+  "KXZAKARIAMENTION": {
+    "base_rate": 0.314815,
+    "n_markets": 54
+  },
+  "KXKINGMENTION": {
+    "base_rate": 0.222222,
+    "n_markets": 9
+  },
+  "KXPERSONMENTION": {
+    "base_rate": 0.568182,
+    "n_markets": 88
+  },
+  "KXCARLSONMENTION": {
+    "base_rate": 0.307692,
+    "n_markets": 13
+  },
+  "KXEARNINGSMENTIONAAL": {
+    "base_rate": 0.583333,
+    "n_markets": 24
+  },
+  "KXBIDENMENTION": {
+    "base_rate": 0.361446,
+    "n_markets": 83
+  },
+  "KXLEBRONMENTION": {
+    "base_rate": 0.047619,
+    "n_markets": 21
+  },
+  "KXEARNINGSMENTIONHLT": {
+    "base_rate": 0.363636,
+    "n_markets": 11
+  },
+  "KXAOCMENTION": {
+    "base_rate": 0.434783,
+    "n_markets": 46
+  },
+  "KXNETANYAHUMENTION": {
+    "base_rate": 0.65,
+    "n_markets": 20
+  },
+  "KXSPANBERGERMENTION": {
+    "base_rate": 0.666667,
+    "n_markets": 15
+  },
+  "KXEARNINGSMENTIONDPZ": {
+    "base_rate": 0.4,
+    "n_markets": 10
+  },
+  "KXEARNINGSMENTIONPLTR": {
+    "base_rate": 0.3,
+    "n_markets": 70
+  },
+  "KXEARNINGSMENTIONNKE": {
+    "base_rate": 0.5,
+    "n_markets": 48
+  },
+  "KXVLADTENEVMENTION": {
+    "base_rate": 0.283019,
+    "n_markets": 53
+  },
+  "KXTRUMPMENTION": {
+    "base_rate": 0.433803,
+    "n_markets": 2840
+  },
+  "KXWEFMENTION": {
+    "base_rate": 0.526316,
+    "n_markets": 38
+  },
+  "KXSHIRLEYMENTION": {
+    "base_rate": 0.25,
+    "n_markets": 12
+  },
+  "KXDIMONMENTION": {
+    "base_rate": 0.575,
+    "n_markets": 40
+  },
+  "KXEARNINGSMENTIONSBUX": {
+    "base_rate": 0.428571,
+    "n_markets": 28
+  },
+  "KXEARNINGSMENTIONHPE": {
+    "base_rate": 0.8,
+    "n_markets": 10
+  },
+  "KXDWTSMENTION": {
+    "base_rate": 0.5,
+    "n_markets": 10
+  },
+  "KXMMMENTION": {
+    "base_rate": 0.342105,
+    "n_markets": 76
+  },
+  "KXEARNINGSMENTIONNVDA": {
+    "base_rate": 0.554348,
+    "n_markets": 92
+  },
+  "KXEARNINGSMENTIONPG": {
+    "base_rate": 0.5,
+    "n_markets": 24
+  },
+  "KXEARNINGSMENTIONMETA": {
+    "base_rate": 0.557143,
+    "n_markets": 70
+  },
+  "KXLEAVITTMENTIONDURATION": {
+    "base_rate": 0.298851,
+    "n_markets": 87
+  },
+  "KXUNMENTION": {
+    "base_rate": 0.6,
+    "n_markets": 35
+  },
+  "KXFEDGOVMENTION": {
+    "base_rate": 0.454545,
+    "n_markets": 11
+  },
+  "KXEARNINGSMENTIONASTS": {
+    "base_rate": 0.625,
+    "n_markets": 8
+  },
+  "KXEARNINGSMENTIONWFC": {
+    "base_rate": 0.666667,
+    "n_markets": 9
+  },
+  "KXWALZMENTION": {
+    "base_rate": 0.5,
+    "n_markets": 100
+  },
+  "KXEARNINGSMENTIONBAC": {
+    "base_rate": 0.791667,
+    "n_markets": 24
+  },
+  "KXNFLMENTION": {
+    "base_rate": 0.510272,
+    "n_markets": 1509
+  },
+  "KXEARNINGSMENTIONEA": {
+    "base_rate": 0.0,
+    "n_markets": 1
+  },
+  "KXJPOWMENTION": {
+    "base_rate": 0.431373,
+    "n_markets": 51
+  },
+  "KXDESANTISMENTION": {
+    "base_rate": 0.357143,
+    "n_markets": 14
+  },
+  "KXDILLONMENTION": {
+    "base_rate": 0.428571,
+    "n_markets": 14
+  },
+  "KXEARNINGSMENTIONULTA": {
+    "base_rate": 0.666667,
+    "n_markets": 12
+  },
+  "KXBENIOFFMENTION": {
+    "base_rate": 0.25,
+    "n_markets": 12
+  },
+  "KXEARNINGSMENTIONLLY": {
+    "base_rate": 0.8,
+    "n_markets": 10
+  },
+  "KXHEGSETHMENTION": {
+    "base_rate": 0.477778,
+    "n_markets": 90
+  },
+  "KXFRANKLINMENTION": {
+    "base_rate": 0.3,
+    "n_markets": 10
+  },
+  "KXBONGINOMENTION": {
+    "base_rate": 0.526316,
+    "n_markets": 38
+  },
+  "KXCFBMENTION": {
+    "base_rate": 0.590909,
+    "n_markets": 44
+  },
+  "KXEARNINGSMENTIONLUCID": {
+    "base_rate": 0.2,
+    "n_markets": 15
+  },
+  "KXMIRANMENTION": {
+    "base_rate": 0.458333,
+    "n_markets": 24
+  },
+  "KXEARNINGSMENTIONABNB": {
+    "base_rate": 0.45,
+    "n_markets": 20
+  },
+  "KXCOLBERTMENTION": {
+    "base_rate": 0.315385,
+    "n_markets": 130
+  },
+  "KXEARNINGSMENTIONCBRL": {
+    "base_rate": 0.411765,
+    "n_markets": 17
+  },
+  "KXEARNINGSMENTIONCHWY": {
+    "base_rate": 0.5,
+    "n_markets": 12
+  },
+  "KXWALLERMENTION": {
+    "base_rate": 0.361111,
+    "n_markets": 36
+  },
+  "KXEARNINGSMENTIONMU": {
+    "base_rate": 0.457143,
+    "n_markets": 35
+  },
+  "KXEARNINGSMENTIONAAPL": {
+    "base_rate": 0.657534,
+    "n_markets": 73
+  },
+  "KXEARNINGSMENTIONTSMC": {
+    "base_rate": 1.0,
+    "n_markets": 12
+  },
+  "KXSHAQMENTION": {
+    "base_rate": 0.076923,
+    "n_markets": 13
+  },
+  "KXGREENDAYMENTION": {
+    "base_rate": 0.0,
+    "n_markets": 1
+  },
+  "KXEARNINGSMENTIONSPOT": {
+    "base_rate": 0.5,
+    "n_markets": 12
+  },
+  "KXNEWSOMMENTION": {
+    "base_rate": 0.435407,
+    "n_markets": 209
+  },
+  "KXEARNINGSMENTIONHIMS": {
+    "base_rate": 0.666667,
+    "n_markets": 27
+  },
+  "KXSTARMERMENTION": {
+    "base_rate": 0.273973,
+    "n_markets": 146
+  },
+  "KXEARNINGSMENTIONKO": {
+    "base_rate": 0.4,
+    "n_markets": 20
+  },
+  "KXEARNINGSMENTIONCAVA": {
+    "base_rate": 0.64,
+    "n_markets": 25
+  },
+  "KXEARNINGSMENTIONV": {
+    "base_rate": 0.307692,
+    "n_markets": 13
+  },
+  "KXEARNINGSMENTIONROKU": {
+    "base_rate": 0.4,
+    "n_markets": 25
+  },
+  "KXGOVERNORMENTION": {
+    "base_rate": 0.534483,
+    "n_markets": 174
+  },
+  "KXEARNINGSMENTIONAMD": {
+    "base_rate": 0.6,
+    "n_markets": 35
+  },
+  "KXEARNINGSMENTIONWEN": {
+    "base_rate": 0.916667,
+    "n_markets": 12
+  },
+  "KXEARNINGSMENTIONCOINBASE": {
+    "base_rate": 0.87234,
+    "n_markets": 47
+  },
+  "KXEARNINGSMENTIONCOST": {
+    "base_rate": 0.75,
+    "n_markets": 48
+  },
+  "KXGLASERMENTION": {
+    "base_rate": 0.263158,
+    "n_markets": 19
+  },
+  "KXSURVIVORMENTION": {
+    "base_rate": 0.324561,
+    "n_markets": 228
+  },
+  "KXSNFMENTION": {
+    "base_rate": 0.508651,
+    "n_markets": 289
+  },
+  "KXMADDOWMENTION": {
+    "base_rate": 0.282051,
+    "n_markets": 39
+  },
+  "KXEARNINGSMENTIONDKNG": {
+    "base_rate": 0.730769,
+    "n_markets": 26
+  },
+  "KXEARNINGSMENTIONPSKY": {
+    "base_rate": 0.833333,
+    "n_markets": 12
+  },
+  "KXZELENSKYYMENTION": {
+    "base_rate": 0.5,
+    "n_markets": 32
+  },
+  "KXGRIFFINMENTION": {
+    "base_rate": 0.066667,
+    "n_markets": 15
+  },
+  "KXAPPLEMENTION": {
+    "base_rate": 0.133333,
+    "n_markets": 15
+  },
+  "KXCROCKETTMENTION": {
+    "base_rate": 0.555556,
+    "n_markets": 27
+  },
+  "KXEARNINGSMENTIONCRM": {
+    "base_rate": 0.727273,
+    "n_markets": 11
+  },
+  "KXSNOOPMENTION": {
+    "base_rate": 0.357143,
+    "n_markets": 14
+  },
+  "KXFIGHTMENTION": {
+    "base_rate": 0.267281,
+    "n_markets": 217
+  },
+  "KXBANNONMENTION": {
+    "base_rate": 0.307692,
+    "n_markets": 13
+  },
+  "KXSOUTHPARKMENTION": {
+    "base_rate": 0.141667,
+    "n_markets": 120
+  },
+  "KXEARNINGSMENTIONRY": {
+    "base_rate": 0.85,
+    "n_markets": 20
+  },
+  "KXVANCEMENTION": {
+    "base_rate": 0.446154,
+    "n_markets": 455
+  },
+  "KXEARNINGSMENTIONGME": {
+    "base_rate": 0.0,
+    "n_markets": 7
+  },
+  "KXEARNINGSMENTIONDAL": {
+    "base_rate": 0.782609,
+    "n_markets": 23
+  },
+  "KXEARNINGSMENTIONMRVL": {
+    "base_rate": 0.47619,
+    "n_markets": 21
+  },
+  "KXDJTNATOMENTION": {
+    "base_rate": 0.233333,
+    "n_markets": 30
+  },
+  "KXEARNINGSMENTIONAVGO": {
+    "base_rate": 0.45,
+    "n_markets": 20
+  },
+  "KXTBPNMENTION": {
+    "base_rate": 0.391304,
+    "n_markets": 46
+  },
+  "KXBTCMENTIONVANCE": {
+    "base_rate": 0.411765,
+    "n_markets": 17
+  },
+  "KXJENSENMENTION": {
+    "base_rate": 0.428571,
+    "n_markets": 56
+  },
+  "KXEARNINGSMENTIONNIO": {
+    "base_rate": 0.6,
+    "n_markets": 15
+  },
+  "KXBUSHMENTION": {
+    "base_rate": 0.166667,
+    "n_markets": 12
+  },
+  "KXEARNINGSMENTIONMCD": {
+    "base_rate": 0.538462,
+    "n_markets": 26
+  },
+  "KXEARNINGSMENTIONRKLB": {
+    "base_rate": 0.72,
+    "n_markets": 25
+  },
+  "KXZIWEMENTION": {
+    "base_rate": 0.192308,
+    "n_markets": 26
+  },
+  "KXLAMMYMENTION": {
+    "base_rate": 0.272727,
+    "n_markets": 11
+  },
+  "KXHOMANMENTION": {
+    "base_rate": 0.57971,
+    "n_markets": 69
+  },
+  "KXSBMENTION": {
+    "base_rate": 0.0,
+    "n_markets": 19
+  },
+  "KXSNLMENTION": {
+    "base_rate": 0.246377,
+    "n_markets": 138
+  },
+  "KXNADALMENTION": {
+    "base_rate": 0.0,
+    "n_markets": 13
+  },
+  "KXEARNINGSMENTIONALIBABA": {
+    "base_rate": 0.384615,
+    "n_markets": 13
+  },
+  "KXEARNINGSMENTIONPEP": {
+    "base_rate": 0.5,
+    "n_markets": 22
+  },
+  "KXEARNINGSMENTIONBLK": {
+    "base_rate": 0.478261,
+    "n_markets": 23
+  },
+  "KXCONGRESSMENTION": {
+    "base_rate": 0.634752,
+    "n_markets": 282
+  },
+  "KXHARTMENTION": {
+    "base_rate": 0.272727,
+    "n_markets": 11
+  },
+  "KXEARNINGSMENTIONNFLX": {
+    "base_rate": 0.625,
+    "n_markets": 56
+  },
+  "KXEARNINGSMENTIONDOLLARGENERAL": {
+    "base_rate": 0.75,
+    "n_markets": 8
+  },
+  "KXEARNINGSMENTIONHOOD": {
+    "base_rate": 0.875,
+    "n_markets": 24
+  },
+  "KXEARNINGSMENTIONADBE": {
+    "base_rate": 0.545455,
+    "n_markets": 11
+  },
+  "KXCOOPERMENTION": {
+    "base_rate": 0.517857,
+    "n_markets": 56
+  },
+  "KXROGANMENTION": {
+    "base_rate": 0.366667,
+    "n_markets": 30
+  },
+  "KXSECPRESSMENTION": {
+    "base_rate": 0.418544,
+    "n_markets": 1154
+  },
+  "KXBTCMENTIONULBRICHT": {
+    "base_rate": 0.583333,
+    "n_markets": 12
+  },
+  "KXINFANTINOMENTION": {
+    "base_rate": 0.423077,
+    "n_markets": 26
+  },
+  "KXNBAMENTION": {
+    "base_rate": 0.574232,
+    "n_markets": 2701
+  },
+  "KXSCOTUSMENTION": {
+    "base_rate": 0.466667,
+    "n_markets": 15
+  },
+  "KXEARNINGSMENTIONKR": {
+    "base_rate": 0.6,
+    "n_markets": 25
+  },
+  "KXEARNINGSMENTIONUAL": {
+    "base_rate": 0.64,
+    "n_markets": 25
+  },
+  "KXEARNINGSMENTIONMCO": {
+    "base_rate": 0.5,
+    "n_markets": 10
+  },
+  "KXGAMEDAYMENTION": {
+    "base_rate": 0.0,
+    "n_markets": 10
+  },
+  "KXFTNMENTION": {
+    "base_rate": 0.434109,
+    "n_markets": 129
+  },
+  "KXMINAJMENTION": {
+    "base_rate": 0.4,
+    "n_markets": 10
+  },
+  "KXEARNINGSMENTIONSFM": {
+    "base_rate": 0.555556,
+    "n_markets": 9
+  },
+  "KXEARNINGSMENTIONGOOGL": {
+    "base_rate": 0.492308,
+    "n_markets": 65
+  },
+  "KXAWARDMENTION": {
+    "base_rate": 0.269231,
+    "n_markets": 52
+  },
+  "KXSTARMERMENTIONB": {
+    "base_rate": 0.208333,
+    "n_markets": 48
+  },
+  "KXEARNINGSMENTIONWMT": {
+    "base_rate": 0.555556,
+    "n_markets": 45
+  },
+  "KXKAMALAMENTION": {
+    "base_rate": 0.283951,
+    "n_markets": 81
+  },
+  "KXMRBEASTMENTION": {
+    "base_rate": 0.487365,
+    "n_markets": 277
+  },
+  "KXPSAKIMENTION": {
+    "base_rate": 0.52,
+    "n_markets": 100
+  },
+  "KXMELANIAMENTION": {
+    "base_rate": 0.3,
+    "n_markets": 90
+  },
+  "KXEARNINGSMENTIONSTZ": {
+    "base_rate": 0.6,
+    "n_markets": 10
+  },
+  "KXHOCHULMENTION": {
+    "base_rate": 0.53668,
+    "n_markets": 259
+  },
+  "KXEARNINGSMENTIONON": {
+    "base_rate": 0.375,
+    "n_markets": 8
+  },
+  "KXOSCARMENTION": {
+    "base_rate": 0.535714,
+    "n_markets": 28
+  },
+  "KXEARNINGSMENTIONTSLA": {
+    "base_rate": 0.628205,
+    "n_markets": 78
+  },
+  "KXDOGSHOWMENTION": {
+    "base_rate": 0.214286,
+    "n_markets": 14
+  },
+  "KXMTPMENTION": {
+    "base_rate": 0.5,
+    "n_markets": 34
+  },
+  "KXEARNINGSMENTIONAXP": {
+    "base_rate": 0.391304,
+    "n_markets": 23
+  },
+  "KXEARNINGSMENTIONETOR": {
+    "base_rate": 0.666667,
+    "n_markets": 9
+  },
+  "KXTALARICOMENTION": {
+    "base_rate": 0.5,
+    "n_markets": 36
+  },
+  "KXNYCMDEBMENTION": {
+    "base_rate": 0.574074,
+    "n_markets": 54
+  },
+  "KXTRUMPMENTIONDURATION": {
+    "base_rate": 0.48,
+    "n_markets": 75
+  },
+  "KXEARNINGSMENTIONGEV": {
+    "base_rate": 0.888889,
+    "n_markets": 9
+  },
+  "KXEARNINGSMENTIONADOBE": {
+    "base_rate": 0.7,
+    "n_markets": 10
+  },
+  "KXEARNINGSMENTIONWING": {
+    "base_rate": 0.5,
+    "n_markets": 8
+  },
+  "KXSWIFTMENTION": {
+    "base_rate": 0.275,
+    "n_markets": 120
+  },
+  "KXMTGMENTION": {
+    "base_rate": 0.75,
+    "n_markets": 12
+  },
+  "KXEARNINGSMENTIONKTOS": {
+    "base_rate": 0.444444,
+    "n_markets": 9
+  },
+  "KXFEDMENTION": {
+    "base_rate": 0.390164,
+    "n_markets": 305
+  },
+  "KXEARNINGSMENTIONUBER": {
+    "base_rate": 0.4,
+    "n_markets": 75
+  },
+  "KXEARNINGSMENTIONDELL": {
+    "base_rate": 0.2,
+    "n_markets": 25
+  },
+  "KXEARNINGSMENTIONVSCO": {
+    "base_rate": 0.7,
+    "n_markets": 10
+  },
+  "KXACKMANMENTION": {
+    "base_rate": 0.25,
+    "n_markets": 12
+  },
+  "KXEARNINGSMENTIONF": {
+    "base_rate": 0.4,
+    "n_markets": 15
+  },
+  "KXEARNINGSMENTIONGS": {
+    "base_rate": 0.478261,
+    "n_markets": 23
+  },
+  "KXFREYMENTION": {
+    "base_rate": 0.55814,
+    "n_markets": 43
+  },
+  "KXPOWELLMENTION": {
+    "base_rate": 0.28169,
+    "n_markets": 142
+  },
+  "KXEARNINGSMENTIONTGT": {
+    "base_rate": 0.458333,
+    "n_markets": 24
+  },
+  "KXLUTNICKFTNMENTION": {
+    "base_rate": 0.21875,
+    "n_markets": 32
+  },
+  "KXEARNINGSMENTIONSNAP": {
+    "base_rate": 0.625,
+    "n_markets": 24
+  },
+  "KXNCAAMENTION": {
+    "base_rate": 0.514238,
+    "n_markets": 597
+  },
+  "KXWALESMENTION": {
+    "base_rate": 0.375,
+    "n_markets": 8
+  },
+  "KXEARNINGSMENTIONCRWD": {
+    "base_rate": 0.652174,
+    "n_markets": 23
+  },
+  "KXBILATERALMENTION": {
+    "base_rate": 0.404255,
+    "n_markets": 94
+  },
+  "KXEARNINGSMENTIONNBIS": {
+    "base_rate": 0.52381,
+    "n_markets": 21
+  }
+}
