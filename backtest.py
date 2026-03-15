@@ -21,6 +21,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from pm_mentions_strategy import CONFIG
+from shared import SERIES_EQUIVALENCES, equiv_series as _equiv_series
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -43,29 +44,6 @@ def load_static_rates(path="base_rates.json"):
     """Load all static rates (series + word-level) for the original backtest."""
     with open(path) as f:
         return json.load(f)
-
-
-# ---------------------------------------------------------------------------
-# Series equivalences (same as strategy file)
-# ---------------------------------------------------------------------------
-
-SERIES_EQUIVALENCES = {
-    "KXFEDMENTION": "KXPOWELLMENTION",
-    "KXJPOWMENTION": "KXPOWELLMENTION",
-    "KXTRUMPMENTIONB": "KXTRUMPMENTION",
-    "KXSTARMERMENTIONB": "KXSTARMERMENTION",
-    "KXTRUMPMENTIONDURATION": "KXTRUMPMENTION",
-}
-
-
-def _equiv_series(series):
-    """Return the canonical series ticker after applying equivalences."""
-    if series in SERIES_EQUIVALENCES:
-        return SERIES_EQUIVALENCES[series]
-    # Strip trailing letter (KXSTARMERMENTIONB → KXSTARMERMENTION)
-    if series[-1:].isalpha() and series[-1] != "N":
-        return series[:-1]
-    return series
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +368,7 @@ def fmt_simple_table(header, rows):
 # Report generation
 # ---------------------------------------------------------------------------
 
-def generate_report(rolling_trades, original_trades, markets):
+def generate_report(rolling_trades, original_trades, markets, cfg):
     """Generate the full backtest report as a markdown string."""
     lines = []
     lines.append("# PM Mentions Backtest Report — Fixed")
@@ -629,12 +607,12 @@ def generate_report(rolling_trades, original_trades, markets):
     lines.append("")
     lines.append("## Methodology Notes")
     lines.append("")
-    lines.append(f"- **Grid filter**: edge >= {cfg_edge*100:.0f}c, "
-                 f"base rate <= {cfg_br*100:.0f}%, "
-                 f"min history >= {cfg_min_hist}, "
-                 f"max YES price <= {cfg_max_yes*100:.0f}%")
-    lines.append(f"- **Fees**: ${CONFIG['kalshi_fee_rt']:.2f} round-trip per contract")
-    lines.append(f"- **Slippage**: ${CONFIG['slippage']:.2f} assumed")
+    lines.append(f"- **Grid filter**: edge >= {cfg['grid_edge_min']*100:.0f}c, "
+                 f"base rate <= {cfg['grid_br_max']*100:.0f}%, "
+                 f"min history >= {cfg['min_history']}, "
+                 f"max YES price <= {cfg['max_yes_price']*100:.0f}%")
+    lines.append(f"- **Fees**: ${cfg['kalshi_fee_rt']:.2f} round-trip per contract")
+    lines.append(f"- **Slippage**: ${cfg['slippage']:.2f} assumed")
     lines.append("- **Side**: Always NO")
     lines.append("- **Rolling base rate**: For each market, `mean(outcomes of all "
                  "prior settled markets in the canonical series)`. Market's own "
@@ -667,13 +645,6 @@ def main():
     static_rates = load_static_rates()
     print(f"  {len(markets):,} markets, {len(libfrog_rates):,} LibFrog word rates")
 
-    # Store config values for report
-    global cfg_edge, cfg_br, cfg_min_hist, cfg_max_yes
-    cfg_edge = CONFIG["grid_edge_min"]
-    cfg_br = CONFIG["grid_br_max"]
-    cfg_min_hist = CONFIG["min_history"]
-    cfg_max_yes = CONFIG["max_yes_price"]
-
     print("\nRunning rolling backtest (honest)...")
     rolling_trades = run_rolling_backtest(markets, libfrog_rates, CONFIG)
     pk = "vwap_25pct_buffer"
@@ -685,7 +656,7 @@ def main():
     print(f"  {len(original_trades)} trades (opening_price + static rates)")
 
     print("\nGenerating report...")
-    report = generate_report(rolling_trades, original_trades, markets)
+    report = generate_report(rolling_trades, original_trades, markets, CONFIG)
 
     # Print summary to console
     fixed_pnls = [t["pnl"][pk] for t in rolling_trades if t["passed"].get(pk)]

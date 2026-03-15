@@ -1,16 +1,20 @@
-# PM Mentions Strategy — Handoff Package
+# PM Mentions Strategy
 
-Self-contained prediction market mention strategy for integration into your paper trading infrastructure.
+Prediction market mention strategy for Kalshi — buy NO when YES is overpriced relative to historical base rates.
 
-## What's Here
+## Files
 
 | File | Purpose |
 |------|---------|
-| `pm_mentions_strategy.py` | Single-file strategy module — all logic, no external deps beyond `requests` + `numpy` |
-| `base_rates.json` | Historical base rates: 203 series-level + ~1,700 word-level LibFrog transcript rates |
-| `strategy_report.md` | Full strategy report — explains everything from scratch, includes updated backtest with LibFrog |
-| `optimized_strategy_report.pdf` | Earlier backtest report with parameter sensitivity analysis (pre-LibFrog) |
-| `optimized_strategy_report.md` | Same earlier report in markdown |
+| `shared.py` | Shared utilities: base rate lookup, Kalshi API, position sizing, settlement PnL, category classification |
+| `pm_mentions_strategy.py` | Original strategy — single edge threshold, max YES 75c |
+| `focused_strategy.py` | Focused strategy — tiered thresholds, max YES 50c, excludes political_person |
+| `base_rates.json` | 203 series-level + ~1,700 word-level LibFrog transcript rates |
+| `backtest.py` | Honest backtest: VWAP entry + rolling base rates (no look-ahead) |
+| `focused_backtest.py` | Focused strategy backtest with OOS validation, parameter grid, category ablation |
+| `tests.py` | Unit tests for edge cases (VZ bug, category defaults, None strike words, etc.) |
+| `strategy_writeup.md` | Comprehensive writeup covering both strategies |
+| `data/kalshi_all_series.json` | 20,252 settled markets with VWAP prices |
 
 ## Quick Start
 
@@ -19,104 +23,46 @@ pip install requests numpy
 ```
 
 ```python
-from pm_mentions_strategy import (
-    load_base_rates,
-    fetch_active_kalshi,
-    compute_signals,
-    size_position,
-    compute_settlement_pnl,
-    check_settlement,
-)
+from shared import load_base_rates, fetch_active_kalshi, size_position
+from focused_strategy import compute_signals, FOCUSED_CONFIG
 
 rates = load_base_rates("base_rates.json")
 markets = fetch_active_kalshi(rates)
 signals = compute_signals(markets, rates)
 
 for sig in signals:
-    n_contracts, cost = size_position(sig, capital=1000)
-    # Submit to your execution system:
-    #   side=NO, ticker=sig["ticker"], n=n_contracts, cost=cost
-    print(f"{sig['ticker']}: {n_contracts} NO @ ${cost:.2f} (rate_source={sig['rate_source']})")
-
-# Later, check settlement:
-result = check_settlement("TICKER-HERE")
-if result:
-    pnl = compute_settlement_pnl(
-        entry_price=sig["yes_mid"], result=result, n_contracts=n_contracts
-    )
+    n_contracts, cost = size_position(sig, capital=1000, config=FOCUSED_CONFIG)
+    print(f"{sig['ticker']}: {n_contracts} NO @ ${cost:.2f} "
+          f"(rate_source={sig['rate_source']})")
 ```
 
-## Strategy Summary
+## Two Strategies
 
-**Grid filter: buy NO on mention markets where YES is overpriced vs historical base rates.**
+### Original (`pm_mentions_strategy.py`)
+- Edge >= 10c, BR <= 50%, max YES 75c, min 10 history
+- Honest backtest: Sharpe 0.063, 52.6% win rate
 
-- Edge threshold: >= 10c (YES mid - base rate)
-- Base rate cap: <= 50%
-- Min history: >= 10 settled markets in series (or n_calls for LibFrog)
-- Max YES price: 75% (skip high-YES markets)
-- Earnings markets are now tradeable via LibFrog word-level rates
-- Quarter-Kelly sizing, 5% max per position, 80% max total exposure
+### Focused (`focused_strategy.py`)
+- Tiered edge: 8c (LibFrog) / 12c (rolling series)
+- Max YES 50c, excludes political_person category
+- Min history: 10 (LibFrog) / 15 (rolling)
+- Honest backtest: Sharpe 0.315, 55.2% win rate, positive OOS
 
-## LibFrog Integration
+See `strategy_writeup.md` for the full analysis.
 
-Word-level earnings transcript base rates from [LibFrog](https://libfrog.com) are baked into `base_rates.json` at rest — no runtime API dependency.
+## Running Backtests
 
-### base_rates.json format
-
-The file contains two kinds of entries:
-
-**Series-level** (keyed by series ticker):
-```json
-"KXEARNINGSMENTIONAAPL": {
-  "base_rate": 0.657534,
-  "n_markets": 73
-}
+```bash
+python backtest.py --save          # writes backtest_report.md
+python focused_backtest.py --save  # writes focused_backtest_report.md
 ```
 
-**Word-level** (keyed as `"SERIES|word"`, source: LibFrog):
-```json
-"KXEARNINGSMENTIONAAPL|iPhone": {
-  "base_rate": 0.78,
-  "n_calls": 74,
-  "source": "libfrog"
-}
+## Running Tests
+
+```bash
+python -m pytest tests.py -v
 ```
 
-### How word-level rates are used
+## Legacy Files
 
-In `compute_signals()`, for each market:
-
-1. Look up `"SERIES|strike_word"` in the rates dict
-2. If found and `n_calls >= 10`, use it as the base rate (`rate_source: "libfrog"`)
-3. If the strike word contains `" / "` (e.g., `"AI / Artificial Intelligence"`), try each part
-4. Fall back to the series-level rate (`rate_source: "series"`)
-
-Each signal dict includes a `rate_source` field (`"libfrog"` or `"series"`) so downstream systems can see which rate was used.
-
-### Data sources
-
-Word-level rates are merged from two LibFrog data files (matched preferred over generic), filtered to entries where `base_rate` is not null and `n_calls >= 5`.
-
-## Backtest Results (555 trades, 20,252 settled markets)
-
-| Metric | Value |
-|--------|-------|
-| Trades | 555 (408 political/other + 145 earnings LibFrog + 2 earnings series) |
-| Win rate | 61.8% |
-| Mean PnL/contract | +$0.105 |
-| Annualized Sharpe | 3.95 |
-| Bootstrap 95% CI | [$0.070, $0.140] |
-| Max drawdown | $9.15 |
-| Total PnL (1 per trade) | +$58.39 |
-
-LibFrog-rated earnings trades alone: **82.8% win rate, Sharpe 5.35, +$15.23 total**.
-
-See `strategy_report.md` for the full breakdown including edge buckets, price buckets, company-level analysis, worked examples, and kill criteria.
-
-## Integration Notes
-
-- `fetch_active_kalshi()` hits the public Kalshi API (no auth needed for market data). Replace with your own data source if you already have one.
-- `compute_signals()` is the core filter — feed it any list of market dicts with `{ticker, series, yes_mid, source, event_ticker}` fields. Include `strike_word` for word-level LibFrog lookups on earnings markets.
-- `size_position()` returns `(n_contracts, total_cost)` — enforce your own exposure limits on top.
-- `CONFIG` dict at the top of `pm_mentions_strategy.py` has all tunable parameters.
-- Update `base_rates.json` periodically as new markets settle to keep base rates current. Re-run the LibFrog merge script to refresh word-level rates.
+- `optimized_strategy_report.pdf` — earlier backtest with inflated numbers (pre-VWAP fix). Superseded by `strategy_writeup.md`.

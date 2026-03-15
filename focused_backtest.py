@@ -21,14 +21,13 @@ from datetime import datetime
 from backtest import (
     load_markets,
     load_libfrog_rates,
-    SERIES_EQUIVALENCES,
-    _equiv_series,
     libfrog_lookup,
     compute_pnl,
     compute_stats,
     fmt_stats_table,
     fmt_simple_table,
 )
+from shared import SERIES_EQUIVALENCES, equiv_series as _equiv_series
 from focused_strategy import FOCUSED_CONFIG
 from pm_mentions_strategy import CONFIG as ORIGINAL_CONFIG
 
