@@ -5,7 +5,8 @@ No dependencies beyond requests + numpy.
 
 Strategy: Buy NO on mention markets where YES is overpriced relative
 to historical base rates. Filter: edge >= 10c, base rate <= 50%,
->= 10 prior markets. Quarter-Kelly sizing. Exclude earnings.
+>= 10 prior markets. Quarter-Kelly sizing. Earnings markets are
+tradeable using LibFrog word-level transcript base rates.
 
 Usage:
     from pm_mentions_strategy import (
@@ -43,7 +44,7 @@ CONFIG = {
     "grid_br_max": 0.50,         # max base rate to trade
     "min_history": 10,           # min settled markets in series before trading
     "max_yes_price": 0.75,       # skip high-YES markets (75-95% bucket has no edge)
-    "exclude_earnings": True,    # earnings markets lose money (-7.6c avg)
+    "exclude_earnings": False,   # LibFrog word-level rates make earnings tradeable
     "kelly_fraction": 0.25,      # quarter-Kelly sizing
     "max_position_pct": 0.05,    # max 5% of capital per position
     "max_total_exposure_pct": 0.80,
@@ -56,12 +57,12 @@ CONFIG = {
 # Base rates
 # ---------------------------------------------------------------------------
 def load_base_rates(path: str = "base_rates.json") -> dict:
-    """Load historical base rates per series.
+    """Load historical base rates per series and word-level LibFrog rates.
 
-    Expected format: {series_ticker: {base_rate: float, n_markets: int}}
-    Generate this from your settled market data — for each series, compute:
-        base_rate = count(result=="yes") / count(all)
-        n_markets = count(all)
+    Format: series-level entries keyed by series ticker:
+        {series: {base_rate: float, n_markets: int}}
+    Word-level entries keyed as "SERIES|word":
+        {"SERIES|word": {base_rate: float, n_calls: int, source: "libfrog"}}
     """
     with open(path) as f:
         return json.load(f)
@@ -95,6 +96,31 @@ def _find_series_rate(series: str, rates: dict) -> dict | None:
 # ---------------------------------------------------------------------------
 # Signal computation (THE STRATEGY)
 # ---------------------------------------------------------------------------
+def _find_word_rate(series: str, strike_word: str, rates: dict) -> tuple[dict | None, str]:
+    """Look up a word-level LibFrog rate for a (series, strike_word) pair.
+
+    Tries "SERIES|word" first, then each part of "word1 / word2" alternatives.
+    Returns (rate_dict_or_None, rate_source).
+    """
+    key = f"{series}|{strike_word}"
+    if key in rates:
+        entry = rates[key]
+        if entry.get("source") == "libfrog" and entry.get("n_calls", 0) >= 10:
+            return entry, "libfrog"
+
+    # Try "/" alternatives
+    if " / " in strike_word:
+        for part in strike_word.split(" / "):
+            part = part.strip()
+            alt_key = f"{series}|{part}"
+            if alt_key in rates:
+                entry = rates[alt_key]
+                if entry.get("source") == "libfrog" and entry.get("n_calls", 0) >= 10:
+                    return entry, "libfrog"
+
+    return None, "series"
+
+
 def compute_signals(
     active_markets: list[dict],
     rates: dict,
@@ -107,6 +133,10 @@ def compute_signals(
 
     Optional fields (used for display/tracking):
         event_title, strike_word, yes_bid, yes_ask, volume, close_time
+
+    For earnings markets, word-level LibFrog rates from base_rates.json
+    (keyed as "SERIES|word") override the series-level rate when available
+    with n_calls >= 10.
     """
     cfg = config or CONFIG
     signals = []
@@ -122,15 +152,24 @@ def compute_signals(
         if cfg.get("exclude_earnings") and "EARNINGS" in series.upper():
             continue
 
-        info = _find_series_rate(series, rates)
-        if not info:
-            continue
+        # --- Rate lookup: word-level first, then series-level ---
+        strike_word = mkt.get("strike_word", "")
+        word_info, rate_source = _find_word_rate(series, strike_word, rates)
 
-        n = info.get("n_markets", 0)
+        if word_info is not None:
+            br = word_info["base_rate"]
+            n = word_info.get("n_calls", 0)
+        else:
+            info = _find_series_rate(series, rates)
+            if not info:
+                continue
+            br = info["base_rate"]
+            n = info.get("n_markets", 0)
+            rate_source = "series"
+
         if n < cfg["min_history"]:
             continue
 
-        br = info["base_rate"]
         edge = yes_mid - br
 
         # GRID FILTER: the entire trading rule
@@ -167,6 +206,7 @@ def compute_signals(
             "expected_pnl": epnl,
             "kelly_quarter": kelly_q,
             "n_history": n,
+            "rate_source": rate_source,
             "volume": mkt.get("volume", 0),
             "close_time": mkt.get("close_time", ""),
         })
@@ -371,7 +411,7 @@ if __name__ == "__main__":
     print(f"Config: edge>={CONFIG['grid_edge_min']*100:.0f}c, "
           f"BR<={CONFIG['grid_br_max']:.0%}, "
           f"maxYES<={CONFIG['max_yes_price']:.0%}, "
-          f"no earnings, 1/4 Kelly")
+          f"LibFrog word rates, 1/4 Kelly")
     print()
 
     # Load base rates
