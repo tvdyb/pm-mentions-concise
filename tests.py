@@ -420,5 +420,122 @@ class TestTranscriptRateIntegration:
         assert signals[0]["base_rate"] == 0.44
 
 
+# ---------------------------------------------------------------------------
+# VWAP computation tests
+# ---------------------------------------------------------------------------
+
+from pm_trade_fetcher import compute_vwap, trades_to_yes_prices, enrich_market
+
+
+class TestVwapComputation:
+    def _make_trades(self, prices_and_sizes, t_start=1000, t_step=100):
+        """Build trade list with evenly spaced timestamps."""
+        return [
+            {"yes_price": p, "size": s, "timestamp": t_start + i * t_step}
+            for i, (p, s) in enumerate(prices_and_sizes)
+        ]
+
+    def test_vwap_no_buffer(self):
+        trades = self._make_trades([(0.20, 10), (0.30, 20), (0.40, 10)])
+        vwap = compute_vwap(trades, 0.0)
+        expected = (0.20*10 + 0.30*20 + 0.40*10) / 40
+        assert abs(vwap - expected) < 1e-6
+
+    def test_vwap_with_buffer(self):
+        """25% buffer on 4 trades (t=0,100,200,300) excludes t<75 and t>225."""
+        trades = self._make_trades([
+            (0.10, 10), (0.20, 10), (0.30, 10), (0.40, 10)
+        ])
+        vwap = compute_vwap(trades, 0.25)
+        # Only trades at t=100 and t=200 are in window [75, 225]
+        expected = (0.20*10 + 0.30*10) / 20
+        assert abs(vwap - expected) < 1e-6
+
+    def test_vwap_too_few_trades(self):
+        trades = self._make_trades([(0.20, 10)])
+        assert compute_vwap(trades, 0.0) is None
+
+    def test_vwap_empty(self):
+        assert compute_vwap([], 0.0) is None
+
+    def test_trades_to_yes_prices_converts_no(self):
+        """NO outcome trades should have yes_price = 1 - price."""
+        raw = [
+            {"price": 0.80, "size": 10, "timestamp": 1000, "outcomeIndex": 1},
+            {"price": 0.30, "size": 5, "timestamp": 1001, "outcomeIndex": 0},
+        ]
+        converted = trades_to_yes_prices(raw)
+        assert len(converted) == 2
+        # NO at 0.80 → YES = 0.20
+        assert abs(converted[0]["yes_price"] - 0.20) < 1e-6
+        # YES at 0.30 → YES = 0.30
+        assert abs(converted[1]["yes_price"] - 0.30) < 1e-6
+
+    def test_enrich_market_computes_all_fields(self):
+        market = {"condition_id": "test"}
+        raw_trades = [
+            {"price": 0.25, "size": 10, "timestamp": 1000, "outcomeIndex": 0},
+            {"price": 0.30, "size": 20, "timestamp": 2000, "outcomeIndex": 0},
+            {"price": 0.35, "size": 10, "timestamp": 3000, "outcomeIndex": 0},
+        ]
+        result = enrich_market(market, raw_trades)
+        assert result["n_trades"] == 3
+        assert result["vwap_no_buffer"] is not None
+        assert result["opening_price"] == 0.25
+        assert result["last_price_trade"] == 0.35
+
+
+# ---------------------------------------------------------------------------
+# PM VWAP backtest tests
+# ---------------------------------------------------------------------------
+
+from pm_vwap_backtest import run_pm_vwap_backtest
+
+
+class TestPmVwapBacktest:
+    def test_rolling_no_lookahead(self):
+        """First 19 markets for a speaker should not generate trades (min_speaker_n=20)."""
+        markets = []
+        for i in range(25):
+            markets.append({
+                "condition_id": f"cid_{i}",
+                "speaker": "trump",
+                "category": "political_person",
+                "strike_word": f"Word{i}",
+                "result": "no",
+                "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
+                "vwap_25pct_buffer": 0.50,
+                "vwap_10pct_buffer": 0.50,
+                "vwap_no_buffer": 0.50,
+                "n_trades": 10,
+            })
+        cfg = dict(PM_CONFIG)
+        trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
+        passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
+        # First 20 have no prior history → no trades
+        # Trade 21+ has rolling rate = 0% (all NO) → edge = 0.50 - 0.0 = 0.50 → passes
+        assert all(t["end_date"] >= "2025-01-21" for t in passed)
+
+    def test_earnings_excluded(self):
+        """Earnings category should be excluded per PM_CONFIG."""
+        markets = []
+        # Build enough speaker history first
+        for i in range(25):
+            markets.append({
+                "condition_id": f"cid_{i}",
+                "speaker": "jensen huang",
+                "category": "earnings",
+                "strike_word": "GPU",
+                "result": "no",
+                "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
+                "vwap_25pct_buffer": 0.50,
+                "n_trades": 10,
+            })
+        cfg = dict(PM_CONFIG)
+        trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
+        passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
+        assert len(passed) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
