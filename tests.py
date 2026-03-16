@@ -237,5 +237,188 @@ class TestSizePosition:
         assert cost == 0.0
 
 
+# ---------------------------------------------------------------------------
+# PM-native strategy tests
+# ---------------------------------------------------------------------------
+
+from pm_focused_strategy import compute_signals as pm_compute_signals, PM_CONFIG
+from pm_base_rates import find_speaker_rate, _normalize_speaker
+
+
+class TestPmNormalizeSpeaker:
+    def test_alias(self):
+        assert _normalize_speaker("Donald Trump") == "trump"
+        assert _normalize_speaker("JD Vance") == "vance"
+        assert _normalize_speaker("J.D. Vance") == "vance"
+        assert _normalize_speaker("Kamala Harris") == "kamala"
+
+    def test_passthrough(self):
+        assert _normalize_speaker("trump") == "trump"
+        assert _normalize_speaker("mrbeast") == "mrbeast"
+
+
+class TestPmFindSpeakerRate:
+    def test_direct_match(self):
+        cal = {"by_speaker": {"trump": {"base_rate": 0.44, "n_markets": 5261}}}
+        result = find_speaker_rate("trump", cal, min_n=20)
+        assert result is not None
+        assert result["base_rate"] == 0.44
+
+    def test_min_n_filter(self):
+        cal = {"by_speaker": {"trump": {"base_rate": 0.44, "n_markets": 10}}}
+        result = find_speaker_rate("trump", cal, min_n=20)
+        assert result is None
+
+    def test_partial_match(self):
+        cal = {"by_speaker": {"trump": {"base_rate": 0.44, "n_markets": 100}}}
+        # "donald trump" normalizes to "trump" via aliases
+        result = find_speaker_rate("Donald Trump", cal, min_n=20)
+        assert result is not None
+
+    def test_no_match(self):
+        cal = {"by_speaker": {}}
+        result = find_speaker_rate("unknown_speaker", cal, min_n=20)
+        assert result is None
+
+
+class TestPmComputeSignals:
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self, **overrides):
+        cal = {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+                "mrbeast": {"base_rate": 0.315, "n_markets": 108},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+                "other": {"base_rate": 0.37, "n_markets": 1612},
+                "earnings": {"base_rate": 0.57, "n_markets": 914},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+        cal.update(overrides)
+        return cal
+
+    def test_trump_signal_above_threshold(self):
+        """Trump at YES=50% vs BR=44% → edge=6% ≥ 4c (high-N threshold)."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(yes_mid=0.50)]
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 1
+        assert signals[0]["side"] == "NO"
+        assert abs(signals[0]["edge"] - 0.06) < 0.001
+
+    def test_trump_below_threshold(self):
+        """Trump at YES=46% vs BR=44% → edge=2% < 4c minimum."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(yes_mid=0.46)]
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 0
+
+    def test_max_yes_cap(self):
+        """YES=70% exceeds max_yes=60% → filtered out."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(yes_mid=0.70)]
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 0
+
+    def test_earnings_excluded(self):
+        """Earnings category excluded per PM backtest findings."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(
+            category="earnings", speaker="coinbase", yes_mid=0.50)]
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 0
+
+    def test_tiered_edge_low_n_speaker(self):
+        """Speaker with <100 markets needs 6c edge (not 4c)."""
+        cal = self._make_calibration()
+        # mrbeast has 108 markets (>100), so still uses 4c threshold
+        # But let's set n_markets to 50 to test the low-N path
+        cal["by_speaker"]["mrbeast"]["n_markets"] = 50
+        mkts = [self._make_pm_market(
+            speaker="mrbeast", category="other", yes_mid=0.36)]
+        # edge = 0.36 - 0.315 = 0.045 → below 6c low-N threshold
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 0
+
+    def test_category_fallback(self):
+        """Unknown speaker falls back to category rate."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(
+            speaker="unknownspeaker", category="other", yes_mid=0.50)]
+        signals = pm_compute_signals(mkts, cal)
+        # edge = 0.50 - 0.37 = 0.13 ≥ 10c category threshold → signal
+        assert len(signals) == 1
+        assert signals[0]["rate_source"] == "category"
+
+
+class TestTranscriptRateIntegration:
+    """Test that transcript word-level rates are used as highest-priority source."""
+
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "Filibuster",
+            "speaker": "trump",
+            "category": "political_person",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_transcript_rate_preferred_over_speaker(self):
+        """When transcript word-level rate exists, it should be used over speaker rate."""
+        from pm_transcript_rates import OUT_PATH
+        if not OUT_PATH.exists():
+            pytest.skip("Transcript rates not generated")
+        cal = self._make_calibration()
+        # "Filibuster" should have 0% rate in Trump transcripts
+        mkts = [self._make_pm_market(yes_mid=0.50, strike_word="Filibuster")]
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 1
+        sig = signals[0]
+        assert sig["rate_source"] == "transcript"
+        # Word-level rate should be much lower than speaker rate (0.44)
+        assert sig["base_rate"] < 0.10
+
+    def test_falls_back_to_speaker_when_no_transcript(self):
+        """Words not in transcripts fall back to speaker-level rate."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(
+            yes_mid=0.50, strike_word="XyzNonexistentWord123")]
+        signals = pm_compute_signals(mkts, cal)
+        assert len(signals) == 1
+        assert signals[0]["rate_source"] == "speaker"
+        assert signals[0]["base_rate"] == 0.44
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

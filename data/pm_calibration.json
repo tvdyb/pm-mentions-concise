@@ -1,0 +1,657 @@
+{
+  "overall": {
+    "base_rate": 0.42644264426442646,
+    "n_markets": 9999
+  },
+  "by_speaker": {
+    "trump": {
+      "base_rate": 0.44041056833301656,
+      "n_markets": 5261,
+      "yes": 2317,
+      "no": 2944
+    },
+    "biden": {
+      "base_rate": 0.30597014925373134,
+      "n_markets": 134,
+      "yes": 41,
+      "no": 93
+    },
+    "kamala": {
+      "base_rate": 0.3024054982817869,
+      "n_markets": 291,
+      "yes": 88,
+      "no": 203
+    },
+    "vance": {
+      "base_rate": 0.4020618556701031,
+      "n_markets": 291,
+      "yes": 117,
+      "no": 174
+    },
+    "walz": {
+      "base_rate": 0.39655172413793105,
+      "n_markets": 58,
+      "yes": 23,
+      "no": 35
+    },
+    "obama": {
+      "base_rate": 0.6923076923076923,
+      "n_markets": 13,
+      "yes": 9,
+      "no": 4
+    },
+    "clinton": {
+      "base_rate": 0.35714285714285715,
+      "n_markets": 14,
+      "yes": 5,
+      "no": 9
+    },
+    "buttigieg": {
+      "base_rate": 0.0,
+      "n_markets": 14,
+      "yes": 0,
+      "no": 14
+    },
+    "pelosi": {
+      "base_rate": 0.1875,
+      "n_markets": 16,
+      "yes": 3,
+      "no": 13
+    },
+    "rfk": {
+      "base_rate": 0.4,
+      "n_markets": 15,
+      "yes": 6,
+      "no": 9
+    },
+    "whitmer": {
+      "base_rate": 0.125,
+      "n_markets": 16,
+      "yes": 2,
+      "no": 14
+    },
+    "zelensky": {
+      "base_rate": 0.6,
+      "n_markets": 10,
+      "yes": 6,
+      "no": 4
+    },
+    "powell": {
+      "base_rate": 0.4691358024691358,
+      "n_markets": 243,
+      "yes": 114,
+      "no": 129
+    },
+    "hegseth": {
+      "base_rate": 0.08571428571428572,
+      "n_markets": 35,
+      "yes": 3,
+      "no": 32
+    },
+    "tucker": {
+      "base_rate": 0.36585365853658536,
+      "n_markets": 41,
+      "yes": 15,
+      "no": 26
+    },
+    "mangione": {
+      "base_rate": 0.0,
+      "n_markets": 14,
+      "yes": 0,
+      "no": 14
+    },
+    "kjp": {
+      "base_rate": 0.3548387096774194,
+      "n_markets": 31,
+      "yes": 11,
+      "no": 20
+    },
+    "leavitt": {
+      "base_rate": 0.3584905660377358,
+      "n_markets": 477,
+      "yes": 171,
+      "no": 306
+    },
+    "armstrong": {
+      "base_rate": 0.3333333333333333,
+      "n_markets": 18,
+      "yes": 6,
+      "no": 12
+    },
+    "trump_elon": {
+      "base_rate": 0.43243243243243246,
+      "n_markets": 37,
+      "yes": 16,
+      "no": 21
+    },
+    "zelenskyy": {
+      "base_rate": 0.3333333333333333,
+      "n_markets": 18,
+      "yes": 6,
+      "no": 12
+    },
+    "elon": {
+      "base_rate": 0.2786885245901639,
+      "n_markets": 61,
+      "yes": 17,
+      "no": 44
+    },
+    "buffett": {
+      "base_rate": 0.5,
+      "n_markets": 16,
+      "yes": 8,
+      "no": 8
+    },
+    "michael": {
+      "base_rate": 0.16666666666666666,
+      "n_markets": 12,
+      "yes": 2,
+      "no": 10
+    },
+    "saylor": {
+      "base_rate": 0.14285714285714285,
+      "n_markets": 14,
+      "yes": 2,
+      "no": 12
+    },
+    "ulbricht": {
+      "base_rate": 0.47058823529411764,
+      "n_markets": 17,
+      "yes": 8,
+      "no": 9
+    },
+    "rutte": {
+      "base_rate": 0.4375,
+      "n_markets": 16,
+      "yes": 7,
+      "no": 9
+    },
+    "mrbeast": {
+      "base_rate": 0.3148148148148148,
+      "n_markets": 108,
+      "yes": 34,
+      "no": 74
+    },
+    "sanders": {
+      "base_rate": 0.42735042735042733,
+      "n_markets": 117,
+      "yes": 50,
+      "no": 67
+    },
+    "swift": {
+      "base_rate": 0.2631578947368421,
+      "n_markets": 57,
+      "yes": 15,
+      "no": 42
+    },
+    "mamdani": {
+      "base_rate": 0.345679012345679,
+      "n_markets": 81,
+      "yes": 28,
+      "no": 53
+    },
+    "oracle": {
+      "base_rate": 0.34615384615384615,
+      "n_markets": 26,
+      "yes": 9,
+      "no": 17
+    },
+    "kimmel": {
+      "base_rate": 0.5333333333333333,
+      "n_markets": 15,
+      "yes": 8,
+      "no": 7
+    },
+    "netanyahu": {
+      "base_rate": 0.5555555555555556,
+      "n_markets": 18,
+      "yes": 10,
+      "no": 8
+    },
+    "the announcers": {
+      "base_rate": 0.5,
+      "n_markets": 28,
+      "yes": 14,
+      "no": 14
+    },
+    "domino\u2019s pizza (dpz)": {
+      "base_rate": 0.6,
+      "n_markets": 10,
+      "yes": 6,
+      "no": 4
+    },
+    "tesla (tsla)": {
+      "base_rate": 0.5714285714285714,
+      "n_markets": 14,
+      "yes": 8,
+      "no": 6
+    },
+    "bad_bunny": {
+      "base_rate": 0.4166666666666667,
+      "n_markets": 12,
+      "yes": 5,
+      "no": 7
+    },
+    "altman": {
+      "base_rate": 0.06451612903225806,
+      "n_markets": 31,
+      "yes": 2,
+      "no": 29
+    },
+    "carpenter": {
+      "base_rate": 0.5833333333333334,
+      "n_markets": 12,
+      "yes": 7,
+      "no": 5
+    },
+    "jeff yan": {
+      "base_rate": 0.0,
+      "n_markets": 10,
+      "yes": 0,
+      "no": 10
+    },
+    "intel": {
+      "base_rate": 0.6153846153846154,
+      "n_markets": 13,
+      "yes": 8,
+      "no": 5
+    },
+    "ea": {
+      "base_rate": 0.0,
+      "n_markets": 13,
+      "yes": 0,
+      "no": 13
+    },
+    "google": {
+      "base_rate": 0.48148148148148145,
+      "n_markets": 27,
+      "yes": 13,
+      "no": 14
+    },
+    "procter & gamble": {
+      "base_rate": 0.3076923076923077,
+      "n_markets": 13,
+      "yes": 4,
+      "no": 9
+    },
+    "palantir": {
+      "base_rate": 0.46153846153846156,
+      "n_markets": 13,
+      "yes": 6,
+      "no": 7
+    },
+    "draftkings": {
+      "base_rate": 0.7692307692307693,
+      "n_markets": 13,
+      "yes": 10,
+      "no": 3
+    },
+    "apple": {
+      "base_rate": 0.6153846153846154,
+      "n_markets": 13,
+      "yes": 8,
+      "no": 5
+    },
+    "roku": {
+      "base_rate": 0.3333333333333333,
+      "n_markets": 12,
+      "yes": 4,
+      "no": 8
+    },
+    "starbucks": {
+      "base_rate": 0.5714285714285714,
+      "n_markets": 14,
+      "yes": 8,
+      "no": 6
+    },
+    "meta": {
+      "base_rate": 0.47619047619047616,
+      "n_markets": 21,
+      "yes": 10,
+      "no": 11
+    },
+    "lyft": {
+      "base_rate": 0.5833333333333334,
+      "n_markets": 12,
+      "yes": 7,
+      "no": 5
+    },
+    "amazon": {
+      "base_rate": 0.6206896551724138,
+      "n_markets": 29,
+      "yes": 18,
+      "no": 11
+    },
+    "uber": {
+      "base_rate": 0.3125,
+      "n_markets": 16,
+      "yes": 5,
+      "no": 11
+    },
+    "microsoft": {
+      "base_rate": 0.7647058823529411,
+      "n_markets": 17,
+      "yes": 13,
+      "no": 4
+    },
+    "reddit": {
+      "base_rate": 0.65,
+      "n_markets": 20,
+      "yes": 13,
+      "no": 7
+    },
+    "chipotle": {
+      "base_rate": 0.6363636363636364,
+      "n_markets": 11,
+      "yes": 7,
+      "no": 4
+    },
+    "coinbase": {
+      "base_rate": 0.875,
+      "n_markets": 32,
+      "yes": 28,
+      "no": 4
+    },
+    "dell": {
+      "base_rate": 0.16666666666666666,
+      "n_markets": 12,
+      "yes": 2,
+      "no": 10
+    },
+    "cava": {
+      "base_rate": 0.75,
+      "n_markets": 12,
+      "yes": 9,
+      "no": 3
+    },
+    "robinhood": {
+      "base_rate": 0.8421052631578947,
+      "n_markets": 19,
+      "yes": 16,
+      "no": 3
+    },
+    "hims": {
+      "base_rate": 0.6923076923076923,
+      "n_markets": 13,
+      "yes": 9,
+      "no": 4
+    },
+    "snowflake": {
+      "base_rate": 0.5,
+      "n_markets": 10,
+      "yes": 5,
+      "no": 5
+    },
+    "celsius": {
+      "base_rate": 0.4166666666666667,
+      "n_markets": 12,
+      "yes": 5,
+      "no": 7
+    },
+    "be said": {
+      "base_rate": 0.2,
+      "n_markets": 20,
+      "yes": 4,
+      "no": 16
+    },
+    "cuomo": {
+      "base_rate": 0.125,
+      "n_markets": 16,
+      "yes": 2,
+      "no": 14
+    },
+    "starmer": {
+      "base_rate": 0.41545893719806765,
+      "n_markets": 207,
+      "yes": 86,
+      "no": 121
+    },
+    "walmart": {
+      "base_rate": 0.5714285714285714,
+      "n_markets": 14,
+      "yes": 8,
+      "no": 6
+    },
+    "nvidia": {
+      "base_rate": 0.47058823529411764,
+      "n_markets": 17,
+      "yes": 8,
+      "no": 9
+    },
+    "disney": {
+      "base_rate": 0.6428571428571429,
+      "n_markets": 14,
+      "yes": 9,
+      "no": 5
+    },
+    "trump_melania": {
+      "base_rate": 0.42857142857142855,
+      "n_markets": 28,
+      "yes": 12,
+      "no": 16
+    },
+    "ackman": {
+      "base_rate": 0.3684210526315789,
+      "n_markets": 19,
+      "yes": 7,
+      "no": 12
+    },
+    "bush": {
+      "base_rate": 0.09090909090909091,
+      "n_markets": 11,
+      "yes": 1,
+      "no": 10
+    },
+    "b_johnson": {
+      "base_rate": 0.4117647058823529,
+      "n_markets": 17,
+      "yes": 7,
+      "no": 10
+    },
+    "shayne": {
+      "base_rate": 0.3157894736842105,
+      "n_markets": 19,
+      "yes": 6,
+      "no": 13
+    },
+    "cramer": {
+      "base_rate": 0.05555555555555555,
+      "n_markets": 18,
+      "yes": 1,
+      "no": 17
+    },
+    "costco": {
+      "base_rate": 0.6875,
+      "n_markets": 16,
+      "yes": 11,
+      "no": 5
+    },
+    "ulta": {
+      "base_rate": 0.6666666666666666,
+      "n_markets": 12,
+      "yes": 8,
+      "no": 4
+    },
+    "fedex": {
+      "base_rate": 0.5,
+      "n_markets": 12,
+      "yes": 6,
+      "no": 6
+    },
+    "nike": {
+      "base_rate": 0.4375,
+      "n_markets": 16,
+      "yes": 7,
+      "no": 9
+    },
+    "chewy": {
+      "base_rate": 0.5,
+      "n_markets": 12,
+      "yes": 6,
+      "no": 6
+    },
+    "adobe": {
+      "base_rate": 0.5454545454545454,
+      "n_markets": 11,
+      "yes": 6,
+      "no": 5
+    },
+    "broadcom": {
+      "base_rate": 0.5,
+      "n_markets": 10,
+      "yes": 5,
+      "no": 5
+    },
+    "bannon": {
+      "base_rate": 0.21052631578947367,
+      "n_markets": 19,
+      "yes": 4,
+      "no": 15
+    },
+    "grande": {
+      "base_rate": 0.06666666666666667,
+      "n_markets": 15,
+      "yes": 1,
+      "no": 14
+    },
+    "jensen huang": {
+      "base_rate": 0.4117647058823529,
+      "n_markets": 17,
+      "yes": 7,
+      "no": 10
+    },
+    "hochul": {
+      "base_rate": 0.6428571428571429,
+      "n_markets": 14,
+      "yes": 9,
+      "no": 5
+    },
+    "jpmorgan": {
+      "base_rate": 0.7692307692307693,
+      "n_markets": 13,
+      "yes": 10,
+      "no": 3
+    },
+    "netflix": {
+      "base_rate": 0.7142857142857143,
+      "n_markets": 14,
+      "yes": 10,
+      "no": 4
+    },
+    "bank of america": {
+      "base_rate": 0.7,
+      "n_markets": 10,
+      "yes": 7,
+      "no": 3
+    },
+    "johnson & johnson": {
+      "base_rate": 0.75,
+      "n_markets": 12,
+      "yes": 9,
+      "no": 3
+    },
+    "delta": {
+      "base_rate": 0.9,
+      "n_markets": 10,
+      "yes": 9,
+      "no": 1
+    },
+    "paypal": {
+      "base_rate": 0.23076923076923078,
+      "n_markets": 13,
+      "yes": 3,
+      "no": 10
+    },
+    "nebius": {
+      "base_rate": 0.5454545454545454,
+      "n_markets": 11,
+      "yes": 6,
+      "no": 5
+    },
+    "united airlines": {
+      "base_rate": 0.6666666666666666,
+      "n_markets": 12,
+      "yes": 8,
+      "no": 4
+    },
+    "melania": {
+      "base_rate": 0.1951219512195122,
+      "n_markets": 41,
+      "yes": 8,
+      "no": 33
+    },
+    "tesla": {
+      "base_rate": 0.6428571428571429,
+      "n_markets": 14,
+      "yes": 9,
+      "no": 5
+    },
+    "ryanair": {
+      "base_rate": 0.38461538461538464,
+      "n_markets": 13,
+      "yes": 5,
+      "no": 8
+    },
+    "eli lilly": {
+      "base_rate": 0.7692307692307693,
+      "n_markets": 13,
+      "yes": 10,
+      "no": 3
+    },
+    "roblox": {
+      "base_rate": 0.8,
+      "n_markets": 10,
+      "yes": 8,
+      "no": 2
+    },
+    "on semiconductor": {
+      "base_rate": 0.16666666666666666,
+      "n_markets": 12,
+      "yes": 2,
+      "no": 10
+    },
+    "s&p global": {
+      "base_rate": 0.8333333333333334,
+      "n_markets": 12,
+      "yes": 10,
+      "no": 2
+    },
+    "radcliffe": {
+      "base_rate": 0.4090909090909091,
+      "n_markets": 22,
+      "yes": 9,
+      "no": 13
+    }
+  },
+  "by_category": {
+    "political_person": {
+      "base_rate": 0.42031312725812925,
+      "n_markets": 7473
+    },
+    "other": {
+      "base_rate": 0.3740694789081886,
+      "n_markets": 1612
+    },
+    "earnings": {
+      "base_rate": 0.5689277899343544,
+      "n_markets": 914
+    }
+  },
+  "metadata": {
+    "n_markets": 9999,
+    "n_speakers": 103,
+    "bucket_edges": [
+      0.0,
+      0.05,
+      0.1,
+      0.15,
+      0.2,
+      0.25,
+      0.3,
+      0.4,
+      0.5,
+      0.75,
+      1.0
+    ]
+  }
+}
