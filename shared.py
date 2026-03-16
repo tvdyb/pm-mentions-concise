@@ -95,6 +95,35 @@ def equiv_series(series: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Expected PnL and Kelly sizing
+# ---------------------------------------------------------------------------
+def compute_expected_pnl(
+    yes_mid: float,
+    base_rate: float,
+    fee: float = 0.0,
+    slippage: float = 0.01,
+    kelly_fraction: float = 0.25,
+) -> tuple[float, float]:
+    """Compute expected PnL per NO contract and quarter-Kelly fraction.
+
+    Returns (expected_pnl, kelly_quarter).
+    """
+    eff_yes = max(0.01, yes_mid - slippage)
+    no_cost = 1.0 - eff_yes
+    p_no = 1.0 - base_rate
+    epnl = p_no * eff_yes - base_rate * no_cost - fee
+
+    if epnl > 0:
+        b = eff_yes / no_cost if no_cost > 0 else 0
+        kelly_full = (p_no * b - base_rate) / b if b > 0 else 0
+        kelly_q = max(0.0, kelly_full * kelly_fraction)
+    else:
+        kelly_q = 0.0
+
+    return epnl, kelly_q
+
+
+# ---------------------------------------------------------------------------
 # Position sizing
 # ---------------------------------------------------------------------------
 def size_position(

@@ -16,14 +16,19 @@ Usage:
 """
 
 import json
+import os
 import re
 import argparse
 from collections import defaultdict
 from pathlib import Path
 
-# Try both transcript sources
-TRANSCRIPTS_PATH = Path("/Users/wilsonw/pm_mentions/data/transcripts/all_events.json")
-ENTITIES_PATH = Path("/Users/wilsonw/pm_mentions/data/entities/events_with_entities.json")
+# Try both transcript sources — configurable via env var PM_MENTIONS_DIR,
+# defaults to ../pm_mentions relative to this file's directory.
+_PM_MENTIONS_DIR = Path(
+    os.environ.get("PM_MENTIONS_DIR", Path(__file__).resolve().parent.parent / "pm_mentions")
+)
+TRANSCRIPTS_PATH = _PM_MENTIONS_DIR / "data" / "transcripts" / "all_events.json"
+ENTITIES_PATH = _PM_MENTIONS_DIR / "data" / "entities" / "events_with_entities.json"
 OUT_PATH = Path("data/pm_transcript_rates.json")
 
 # Speaker name normalization to match pm_base_rates.py conventions
@@ -193,6 +198,17 @@ def load_transcript_rates(path: str = str(OUT_PATH)) -> dict:
         return json.load(f)
 
 
+_lower_index_cache: dict[int, dict] = {}
+
+
+def _get_lower_index(word_rates: dict) -> dict:
+    """Build/retrieve a case-insensitive index for word_rates."""
+    key = id(word_rates)
+    if key not in _lower_index_cache:
+        _lower_index_cache[key] = {k.lower(): v for k, v in word_rates.items()}
+    return _lower_index_cache[key]
+
+
 def find_transcript_rate(
     speaker: str,
     word: str,
@@ -212,10 +228,8 @@ def find_transcript_rate(
     """
     word_rates = rates.get("rates", rates)
 
-    # Build case-insensitive index on first call (cached on dict)
-    if "_lower_index" not in rates:
-        rates["_lower_index"] = {k.lower(): v for k, v in word_rates.items()}
-    lower_index = rates["_lower_index"]
+    # Build case-insensitive index (cached per id of word_rates dict)
+    lower_index = _get_lower_index(word_rates)
 
     def _lookup(sp: str, w: str) -> dict | None:
         # Try exact match first, then case-insensitive

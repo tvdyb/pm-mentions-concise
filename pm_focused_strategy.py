@@ -21,6 +21,7 @@ Usage:
 
 from pm_base_rates import find_speaker_rate, find_category_rate, _normalize_speaker
 from pm_transcript_rates import find_transcript_rate, load_transcript_rates, OUT_PATH
+from shared import compute_expected_pnl
 
 # ---------------------------------------------------------------------------
 # Strategy parameters
@@ -121,8 +122,9 @@ def compute_signals(
     if OUT_PATH.exists():
         try:
             transcript_rates = load_transcript_rates()
-        except Exception:
-            pass
+        except (ValueError, OSError) as e:
+            import warnings
+            warnings.warn(f"Failed to load transcript rates: {e}")
 
     for mkt in active_markets:
         yes_mid = mkt["yes_mid"]
@@ -206,17 +208,9 @@ def compute_signals(
             continue
 
         # --- Expected PnL and Kelly sizing ---
-        eff_yes = max(0.01, yes_mid - slip)
-        no_cost = 1.0 - eff_yes
-        p_no = 1.0 - br
-        epnl = p_no * eff_yes - br * no_cost - fee
-
-        if epnl > 0:
-            b = eff_yes / no_cost if no_cost > 0 else 0
-            kelly_full = (p_no * b - br) / b if b > 0 else 0
-            kelly_q = max(0.0, kelly_full * cfg["kelly_fraction"])
-        else:
-            kelly_q = 0.0
+        epnl, kelly_q = compute_expected_pnl(
+            yes_mid, br, fee=fee, slippage=slip,
+            kelly_fraction=cfg["kelly_fraction"])
 
         signals.append({
             "ticker": mkt.get("ticker", mkt.get("condition_id", "")),

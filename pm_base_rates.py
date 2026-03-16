@@ -19,23 +19,6 @@ from pathlib import Path
 DATA_PATH = Path("data/pm_resolved_markets.json")
 OUT_PATH = Path("data/pm_calibration.json")
 
-# Price bucket boundaries — narrower at the low end where our edge lives
-BUCKET_EDGES = [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.00]
-
-
-def bucket_label(lo: float, hi: float) -> str:
-    return f"{lo:.0%}-{hi:.0%}"
-
-
-def find_bucket(price: float) -> str | None:
-    """Find which bucket a price falls into."""
-    for i in range(len(BUCKET_EDGES) - 1):
-        lo, hi = BUCKET_EDGES[i], BUCKET_EDGES[i + 1]
-        if lo <= price < hi:
-            return bucket_label(lo, hi)
-    return None
-
-
 def build_calibration(markets: list[dict]) -> dict:
     """Build calibration curves from resolved markets.
 
@@ -106,7 +89,6 @@ def build_calibration(markets: list[dict]) -> dict:
         "metadata": {
             "n_markets": len(resolved),
             "n_speakers": len(speaker_rates),
-            "bucket_edges": BUCKET_EDGES,
         },
     }
 
@@ -187,11 +169,6 @@ def find_speaker_rate(
 
     if sp in by_speaker and by_speaker[sp]["n_markets"] >= min_n:
         return by_speaker[sp]
-
-    # Try partial match
-    for key, data in by_speaker.items():
-        if (sp in key or key in sp) and data["n_markets"] >= min_n:
-            return data
 
     return None
 

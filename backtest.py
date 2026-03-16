@@ -104,17 +104,13 @@ def static_rate_lookup(static_rates, series, strike_word, is_earnings):
 
 
 # ---------------------------------------------------------------------------
-# PnL computation (matches compute_settlement_pnl in strategy file)
+# PnL computation — delegates to shared.compute_settlement_pnl
 # ---------------------------------------------------------------------------
 
 def compute_pnl(entry_price, result, fee, slippage):
     """Compute per-contract PnL for a NO trade."""
-    eff_yes = max(0.01, entry_price - slippage)
-    no_cost = 1.0 - eff_yes
-    if result == "no":
-        return eff_yes - fee
-    else:
-        return -no_cost - fee
+    from shared import compute_settlement_pnl
+    return compute_settlement_pnl(entry_price, result, fee=fee, slippage=slippage)
 
 
 # ---------------------------------------------------------------------------

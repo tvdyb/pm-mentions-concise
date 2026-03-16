@@ -23,6 +23,7 @@ Usage:
 from shared import (
     find_series_rate,
     find_word_rate,
+    compute_expected_pnl,
     SERIES_EQUIVALENCES,
 )
 
@@ -142,18 +143,9 @@ def compute_signals(
 
         # --- Expected PnL and Kelly sizing ---
         fee = fee_kalshi if mkt.get("source") == "kalshi" else 0.0
-        eff_yes = max(0.01, yes_mid - slip)
-        no_cost = 1.0 - eff_yes
-
-        p_no = 1.0 - br
-        epnl = p_no * eff_yes - br * no_cost - fee
-
-        if epnl > 0:
-            b = eff_yes / no_cost if no_cost > 0 else 0
-            kelly_full = (p_no * b - br) / b if b > 0 else 0
-            kelly_q = max(0.0, kelly_full * cfg["kelly_fraction"])
-        else:
-            kelly_q = 0.0
+        epnl, kelly_q = compute_expected_pnl(
+            yes_mid, br, fee=fee, slippage=slip,
+            kelly_fraction=cfg["kelly_fraction"])
 
         signals.append({
             "ticker": mkt.get("ticker", ""),

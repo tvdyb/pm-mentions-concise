@@ -238,7 +238,7 @@ def compute_stats(values, label=""):
     # Bootstrap CI
     rng = np.random.default_rng(42)
     boot = [float(np.mean(rng.choice(arr, size=n, replace=True)))
-            for _ in range(5000)]
+            for _ in range(10_000)]
     ci_lo = float(np.percentile(boot, 2.5))
     ci_hi = float(np.percentile(boot, 97.5))
 
