@@ -51,6 +51,9 @@ PM_CONFIG = {
     # and earnings is strongly negative (opposite of Kalshi!)
     "exclude_categories": ["earnings"],
 
+    # Speaker exclusions — backtest shows these are break-even to negative
+    "exclude_speakers": ["starmer", "vance"],
+
     # Min history for rate to be trusted
     "min_speaker_n": 20,            # need 20+ resolved markets per speaker
     "min_category_n": 50,           # category rates need more data
@@ -116,6 +119,7 @@ def compute_signals(
     slip = cfg["slippage"]
     min_vol = cfg.get("min_volume", 0.0)
     exclude_cats = set(cfg.get("exclude_categories", []))
+    exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
 
     # Load transcript word-level rates if available
     transcript_rates = {}
@@ -148,6 +152,10 @@ def compute_signals(
         if not speaker:
             series = mkt.get("series", "")
             speaker = _series_to_speaker(series)
+
+        # --- Speaker exclusion ---
+        if speaker.lower() in exclude_speakers:
+            continue
 
         category = mkt.get("category", "other")
         br = None

@@ -537,5 +537,258 @@ class TestPmVwapBacktest:
         assert len(passed) == 0
 
 
+# ---------------------------------------------------------------------------
+# Order book walking tests (Task 5)
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass
+
+
+@dataclass
+class MockOrderSummary:
+    price: str
+    size: str
+
+
+from polymarket_client import walk_order_book_ev, check_daily_loss, record_trade
+
+
+class TestWalkOrderBookEv:
+    def _make_asks(self, price_size_pairs):
+        """Build mock asks from (price, size) pairs, sorted ascending."""
+        return [MockOrderSummary(price=str(p), size=str(s))
+                for p, s in sorted(price_size_pairs)]
+
+    def test_all_levels_positive_ev(self):
+        """All ask levels are +EV → take all of them."""
+        asks = self._make_asks([(0.60, 10), (0.65, 20), (0.70, 15)])
+        cfg = {"fee": 0.0, "slippage": 0.01}
+        # base_rate = 0.10 → YES implied at 0.40 has epnl > 0
+        levels = walk_order_book_ev(asks, base_rate=0.10, config=cfg, max_contracts=100)
+        assert len(levels) == 3
+        total = sum(lv["size"] for lv in levels)
+        assert total == 45
+
+    def test_stops_at_negative_ev(self):
+        """Stops walking when a level is not +EV."""
+        # base_rate=0.45 → YES implied must be > ~0.45 for +EV
+        # NO price 0.50 → YES=0.50 → marginal
+        # NO price 0.40 → YES=0.60 → not +EV if BR=0.45 (epnl depends on exact calc)
+        asks = self._make_asks([(0.70, 10), (0.30, 10)])
+        cfg = {"fee": 0.0, "slippage": 0.01}
+        # base_rate=0.45: NO@0.70 → YES=0.30 → edge=0.30-0.45=-0.15 → NOT +EV
+        # Actually wait, for NO buying: we want YES to be HIGH (overpriced)
+        # epnl = P(NO)*eff_yes - P(YES)*no_cost
+        # at NO@0.70: eff_yes = 1-0.70-0.01=0.29, no_cost=0.70
+        # epnl = 0.55 * 0.29 - 0.45 * 0.70 = 0.1595 - 0.315 = -0.1555 → not +EV
+        # at NO@0.30: eff_yes = 1-0.30-0.01=0.69, no_cost=0.30
+        # epnl = 0.55 * 0.69 - 0.45 * 0.30 = 0.3795 - 0.135 = +0.2445 → +EV
+        levels = walk_order_book_ev(asks, base_rate=0.45, config=cfg, max_contracts=100)
+        # Only the NO@0.30 level is +EV
+        assert len(levels) == 1
+        assert levels[0]["no_price"] == 0.30
+
+    def test_respects_max_contracts(self):
+        """Stops when max_contracts is reached."""
+        asks = self._make_asks([(0.60, 100)])
+        cfg = {"fee": 0.0, "slippage": 0.01}
+        levels = walk_order_book_ev(asks, base_rate=0.10, config=cfg, max_contracts=25)
+        assert len(levels) == 1
+        assert levels[0]["size"] == 25
+
+    def test_empty_asks(self):
+        """No asks → no levels."""
+        levels = walk_order_book_ev(
+            [], base_rate=0.10, config={"fee": 0.0, "slippage": 0.01},
+            max_contracts=100)
+        assert levels == []
+
+    def test_all_negative_ev(self):
+        """All levels are -EV → empty result."""
+        # base_rate=0.90 → almost always YES wins → NO is -EV
+        asks = self._make_asks([(0.20, 10)])
+        cfg = {"fee": 0.0, "slippage": 0.01}
+        levels = walk_order_book_ev(asks, base_rate=0.90, config=cfg, max_contracts=100)
+        assert levels == []
+
+
+# ---------------------------------------------------------------------------
+# FOK +EV gating tests
+# ---------------------------------------------------------------------------
+
+class TestFokEvGating:
+    """Verify that the strategy only sends FOK when +EV at executable price."""
+
+    def test_positive_ev_at_best_ask(self):
+        """If best NO ask gives +EV, walk_order_book_ev returns it."""
+        ask = MockOrderSummary(price="0.60", size="50")
+        cfg = {"fee": 0.0, "slippage": 0.01}
+        levels = walk_order_book_ev([ask], base_rate=0.20, config=cfg, max_contracts=50)
+        assert len(levels) == 1
+        assert levels[0]["epnl"] > 0
+
+    def test_negative_ev_at_best_ask(self):
+        """If best NO ask is -EV, no FOK should be sent."""
+        ask = MockOrderSummary(price="0.10", size="50")
+        cfg = {"fee": 0.0, "slippage": 0.01}
+        # NO@0.10 → YES=0.90 → base_rate=0.85 → high BR, small edge
+        # epnl = 0.15 * (0.90-0.01) - 0.85 * 0.10 = 0.1335 - 0.085 = +0.048 → actually +EV
+        # Let's use base_rate=0.95 instead
+        levels = walk_order_book_ev([ask], base_rate=0.95, config=cfg, max_contracts=50)
+        assert levels == []
+
+
+# ---------------------------------------------------------------------------
+# Position tracking tests
+# ---------------------------------------------------------------------------
+
+class TestPositionTracking:
+    def test_record_trade_creates_position(self):
+        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+        record_trade(state, "cond_abc", "Bitcoin", "trump",
+                     10, 0.70, 7.0, {"orderID": "ord123"})
+        assert "cond_abc" in state["positions"]
+        pos = state["positions"]["cond_abc"]
+        assert pos["n_contracts"] == 10
+        assert abs(pos["total_cost"] - 7.0) < 1e-6
+        assert pos["speaker"] == "trump"
+        assert len(state["trades"]) == 1
+
+    def test_record_trade_accumulates(self):
+        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+        record_trade(state, "cond_abc", "Bitcoin", "trump", 10, 0.70, 7.0, None)
+        record_trade(state, "cond_abc", "Bitcoin", "trump", 5, 0.65, 3.25, None)
+        pos = state["positions"]["cond_abc"]
+        assert pos["n_contracts"] == 15
+        assert abs(pos["total_cost"] - 10.25) < 1e-6
+        assert len(state["trades"]) == 2
+
+    def test_daily_pnl_tracked(self):
+        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+        record_trade(state, "c1", "Word1", "trump", 10, 0.70, 7.0, None)
+        record_trade(state, "c2", "Word2", "trump", 5, 0.60, 3.0, None)
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        assert abs(state["daily_pnl"][today] - (-10.0)) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Speaker exclusion tests
+# ---------------------------------------------------------------------------
+
+class TestSpeakerExclusion:
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+                "starmer": {"base_rate": 0.42, "n_markets": 207},
+                "vance": {"base_rate": 0.40, "n_markets": 291},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_starmer_excluded(self):
+        """Starmer is in exclude_speakers → no signal."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(speaker="starmer", yes_mid=0.55)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 0
+
+    def test_vance_excluded(self):
+        """Vance is in exclude_speakers → no signal."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(speaker="vance", yes_mid=0.55)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 0
+
+    def test_trump_not_excluded(self):
+        """Trump is NOT in exclude_speakers → signal passes."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(speaker="trump", yes_mid=0.50)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+    def test_exclusion_configurable(self):
+        """Can override exclude_speakers to empty list."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(speaker="starmer", yes_mid=0.55)]
+        cfg = dict(PM_CONFIG)
+        cfg["exclude_speakers"] = []
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        # With empty exclusion list, starmer at YES=55% vs BR=42% → edge=13% → passes
+        assert len(signals) == 1
+
+
+# ---------------------------------------------------------------------------
+# Daily loss limit tests
+# ---------------------------------------------------------------------------
+
+class TestDailyLossLimit:
+    def test_ok_when_no_trades(self):
+        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+        ok, pnl = check_daily_loss(state, max_daily_loss=25.0)
+        assert ok is True
+        assert pnl == 0.0
+
+    def test_ok_within_limit(self):
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        state = {"positions": {}, "trades": [], "daily_pnl": {today: -20.0}}
+        ok, pnl = check_daily_loss(state, max_daily_loss=25.0)
+        assert ok is True
+
+    def test_breached_at_limit(self):
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        state = {"positions": {}, "trades": [], "daily_pnl": {today: -30.0}}
+        ok, pnl = check_daily_loss(state, max_daily_loss=25.0)
+        assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# VWAP backtest speaker exclusion test
+# ---------------------------------------------------------------------------
+
+class TestVwapBacktestSpeakerExclusion:
+    def test_excluded_speaker_not_traded(self):
+        """Starmer markets should be excluded in VWAP backtest."""
+        markets = []
+        for i in range(25):
+            markets.append({
+                "condition_id": f"cid_{i}",
+                "speaker": "starmer",
+                "category": "political_person",
+                "strike_word": f"Word{i}",
+                "result": "no",
+                "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
+                "vwap_25pct_buffer": 0.55,
+                "n_trades": 10,
+            })
+        cfg = dict(PM_CONFIG)
+        trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
+        passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
+        assert len(passed) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

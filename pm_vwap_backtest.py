@@ -79,6 +79,7 @@ def run_pm_vwap_backtest(
     slip = cfg["slippage"]
     fee = cfg.get("fee", 0.0)
     exclude_cats = set(cfg.get("exclude_categories", []))
+    exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
 
     # Sort by end_date (chronological order for rolling rates)
     sorted_markets = sorted(markets, key=lambda m: m.get("end_date", ""))
@@ -100,8 +101,9 @@ def run_pm_vwap_backtest(
         strike_word = m.get("strike_word", "")
         outcome = 1 if result == "yes" else 0
 
-        # --- Category exclusion ---
+        # --- Category / speaker exclusion ---
         cat_excluded = category in exclude_cats
+        speaker_excluded = speaker.lower() in exclude_speakers
 
         # --- Determine base rate (no look-ahead) ---
         br = None
@@ -155,6 +157,7 @@ def run_pm_vwap_backtest(
             "end_date": m.get("end_date", ""),
             "n_trades": m.get("n_trades", 0),
             "cat_excluded": cat_excluded,
+            "speaker_excluded": speaker_excluded,
             "passed": {},
             "pnl": {},
             "entry": {},
@@ -171,7 +174,7 @@ def run_pm_vwap_backtest(
                 trade_row["passed"][pk] = False
                 continue
 
-            if cat_excluded:
+            if cat_excluded or speaker_excluded:
                 trade_row["passed"][pk] = False
                 continue
 

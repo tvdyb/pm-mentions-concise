@@ -147,7 +147,8 @@ def size_position(
     no_cost = 1.0 - eff_yes
     n_contracts = int(position_size / no_cost)
 
-    if n_contracts < 1:
+    min_size = config.get("min_order_size", 5)
+    if n_contracts < min_size:
         return 0, 0.0
 
     total_cost = n_contracts * no_cost
@@ -163,7 +164,7 @@ def compute_settlement_pnl(
     side: str = "NO",
     n_contracts: int = 1,
     config: dict | None = None,
-    fee: float = 0.02,
+    fee: float = 0.0,
     slippage: float = 0.01,
 ) -> float:
     """Compute realized PnL when a market settles."""

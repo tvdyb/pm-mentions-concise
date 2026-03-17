@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 polymarket_client.py
 data/pm_markets_with_trades.tmp
+data/positions.json
+logs/
