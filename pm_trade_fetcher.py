@@ -189,10 +189,12 @@ def load_existing() -> dict:
 
 
 def save_progress(markets: list[dict], metadata: dict):
-    """Save current progress to disk."""
+    """Save current progress to disk (atomic write to avoid corruption)."""
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_PATH, "w") as f:
+    tmp = OUT_PATH.with_suffix(".tmp")
+    with open(tmp, "w") as f:
         json.dump({"markets": markets, "metadata": metadata}, f)
+    tmp.replace(OUT_PATH)
 
 
 def show_stats():
@@ -232,6 +234,15 @@ def show_stats():
                   f"mean VWAP={sum(vwaps_r)/len(vwaps_r):.4f}")
 
 
+def _fetch_and_enrich(market: dict) -> dict:
+    """Fetch trades and enrich a single market. Thread-safe."""
+    cid = market["condition_id"]
+    raw_trades = fetch_trades_for_market(cid)
+    enriched_market = dict(market)
+    enrich_market(enriched_market, raw_trades)
+    return enriched_market
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fetch CLOB trades for resolved PM mention markets")
@@ -241,6 +252,8 @@ def main():
                         help="Show stats on existing data")
     parser.add_argument("--delay", type=float, default=0.15,
                         help="Delay between API calls (seconds)")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Concurrent workers (default: 1)")
     args = parser.parse_args()
 
     if args.stats:
@@ -272,34 +285,30 @@ def main():
     n_with_trades = 0
     t_start = time.time()
 
-    for i, market in enumerate(to_fetch):
-        cid = market["condition_id"]
-        word = market.get("strike_word", "")[:30]
+    if args.workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        print(f"  Using {args.workers} concurrent workers")
 
-        # Fetch trades
-        raw_trades = fetch_trades_for_market(cid)
-        enriched_market = dict(market)  # copy
-        enrich_market(enriched_market, raw_trades)
+        batch_size = SAVE_INTERVAL
+        for batch_start in range(0, len(to_fetch), batch_size):
+            batch = to_fetch[batch_start:batch_start + batch_size]
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                futures = {executor.submit(_fetch_and_enrich, m): m for m in batch}
+                for future in as_completed(futures):
+                    result = future.result()
+                    enriched.append(result)
+                    enriched_ids.add(result["condition_id"])
+                    n_fetched += 1
+                    if result.get("n_trades", 0) > 0:
+                        n_with_trades += 1
 
-        enriched.append(enriched_market)
-        enriched_ids.add(cid)
-        n_fetched += 1
-
-        if enriched_market.get("n_trades", 0) > 0:
-            n_with_trades += 1
-
-        # Progress
-        if (i + 1) % 10 == 0 or i == 0:
             elapsed = time.time() - t_start
             rate = n_fetched / elapsed if elapsed > 0 else 0
             eta = (len(to_fetch) - n_fetched) / rate / 60 if rate > 0 else 0
             print(f"  [{n_fetched}/{len(to_fetch)}] "
                   f"{n_with_trades} with trades, "
-                  f"{rate:.1f}/s, ETA {eta:.0f}m  "
-                  f"latest: {word}")
+                  f"{rate:.1f}/s, ETA {eta:.0f}m")
 
-        # Save periodically
-        if n_fetched % SAVE_INTERVAL == 0:
             metadata = {
                 "n_total": len(enriched),
                 "n_with_trades": sum(1 for m in enriched if m.get("n_trades", 0) > 0),
@@ -307,8 +316,41 @@ def main():
             }
             save_progress(enriched, metadata)
             print(f"  Saved progress ({len(enriched)} markets)")
+    else:
+        for i, market in enumerate(to_fetch):
+            cid = market["condition_id"]
+            word = market.get("strike_word", "")[:30]
 
-        time.sleep(args.delay)
+            raw_trades = fetch_trades_for_market(cid)
+            enriched_market = dict(market)
+            enrich_market(enriched_market, raw_trades)
+
+            enriched.append(enriched_market)
+            enriched_ids.add(cid)
+            n_fetched += 1
+
+            if enriched_market.get("n_trades", 0) > 0:
+                n_with_trades += 1
+
+            if (i + 1) % 10 == 0 or i == 0:
+                elapsed = time.time() - t_start
+                rate = n_fetched / elapsed if elapsed > 0 else 0
+                eta = (len(to_fetch) - n_fetched) / rate / 60 if rate > 0 else 0
+                print(f"  [{n_fetched}/{len(to_fetch)}] "
+                      f"{n_with_trades} with trades, "
+                      f"{rate:.1f}/s, ETA {eta:.0f}m  "
+                      f"latest: {word}")
+
+            if n_fetched % SAVE_INTERVAL == 0:
+                metadata = {
+                    "n_total": len(enriched),
+                    "n_with_trades": sum(1 for m in enriched if m.get("n_trades", 0) > 0),
+                    "fetched_at": datetime.now().isoformat(),
+                }
+                save_progress(enriched, metadata)
+                print(f"  Saved progress ({len(enriched)} markets)")
+
+            time.sleep(args.delay)
 
     # Final save
     metadata = {
