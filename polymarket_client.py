@@ -233,9 +233,9 @@ def enrich_with_order_book(client, markets: list[dict]) -> list[dict]:
         if not yes_bids:
             continue
 
-        # Best YES bid = highest price (CLOB returns ascending)
-        best_bid = float(yes_bids[-1].price)
-        best_ask = float(yes_asks[-1].price) if yes_asks else 1.0
+        # CLOB returns bids descending (best first), asks ascending (best first)
+        best_bid = float(yes_bids[0].price)
+        best_ask = float(yes_asks[0].price) if yes_asks else 1.0
         spread = best_ask - best_bid
 
         mkt = dict(mkt)  # shallow copy
@@ -288,8 +288,8 @@ def walk_order_book_ev(
     levels: list[dict] = []
     remaining = max_contracts
 
-    # Walk from highest YES bid (best for NO buyer) downward
-    for bid in reversed(yes_bids):
+    # CLOB returns bids descending (highest first) — walk top-down
+    for bid in yes_bids:
         if remaining <= 0:
             break
 

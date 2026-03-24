@@ -555,9 +555,9 @@ from polymarket_client import walk_order_book_ev, check_daily_loss, record_trade
 
 class TestWalkOrderBookEv:
     def _make_yes_bids(self, price_size_pairs):
-        """Build mock YES bids from (price, size) pairs, sorted ascending (CLOB format)."""
+        """Build mock YES bids from (price, size) pairs, sorted descending (CLOB format)."""
         return [MockOrderSummary(price=str(p), size=str(s))
-                for p, s in sorted(price_size_pairs)]
+                for p, s in sorted(price_size_pairs, reverse=True)]
 
     def test_all_levels_positive_ev(self):
         """All YES bid levels are +EV for NO → take all of them."""
