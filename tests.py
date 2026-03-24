@@ -554,50 +554,43 @@ from polymarket_client import walk_order_book_ev, check_daily_loss, record_trade
 
 
 class TestWalkOrderBookEv:
-    def _make_asks(self, price_size_pairs):
-        """Build mock asks from (price, size) pairs, sorted ascending."""
+    def _make_yes_bids(self, price_size_pairs):
+        """Build mock YES bids from (price, size) pairs, sorted ascending (CLOB format)."""
         return [MockOrderSummary(price=str(p), size=str(s))
                 for p, s in sorted(price_size_pairs)]
 
     def test_all_levels_positive_ev(self):
-        """All ask levels are +EV → take all of them."""
-        asks = self._make_asks([(0.60, 10), (0.65, 20), (0.70, 15)])
+        """All YES bid levels are +EV for NO → take all of them."""
+        # YES bids at 0.40, 0.35, 0.30 → NO prices 0.60, 0.65, 0.70
+        bids = self._make_yes_bids([(0.40, 10), (0.35, 20), (0.30, 15)])
         cfg = {"fee": 0.0, "slippage": 0.01}
-        # base_rate = 0.10 → YES implied at 0.40 has epnl > 0
-        levels = walk_order_book_ev(asks, base_rate=0.10, config=cfg, max_contracts=100)
+        levels = walk_order_book_ev(bids, base_rate=0.10, config=cfg, max_contracts=100)
         assert len(levels) == 3
         total = sum(lv["size"] for lv in levels)
         assert total == 45
 
     def test_stops_at_negative_ev(self):
-        """Stops walking when a level is not +EV."""
-        # base_rate=0.45 → YES implied must be > ~0.45 for +EV
-        # NO price 0.50 → YES=0.50 → marginal
-        # NO price 0.40 → YES=0.60 → not +EV if BR=0.45 (epnl depends on exact calc)
-        asks = self._make_asks([(0.70, 10), (0.30, 10)])
+        """Stops walking when a YES bid level makes NO trade -EV."""
+        # YES bid at 0.70 → NO@0.30 → +EV with BR=0.45
+        # YES bid at 0.30 → NO@0.70 → -EV with BR=0.45
+        # epnl at YES=0.70: 0.55 * 0.69 - 0.45 * 0.30 = +0.2445 → +EV
+        # epnl at YES=0.30: 0.55 * 0.29 - 0.45 * 0.70 = -0.1555 → -EV
+        bids = self._make_yes_bids([(0.70, 10), (0.30, 10)])
         cfg = {"fee": 0.0, "slippage": 0.01}
-        # base_rate=0.45: NO@0.70 → YES=0.30 → edge=0.30-0.45=-0.15 → NOT +EV
-        # Actually wait, for NO buying: we want YES to be HIGH (overpriced)
-        # epnl = P(NO)*eff_yes - P(YES)*no_cost
-        # at NO@0.70: eff_yes = 1-0.70-0.01=0.29, no_cost=0.70
-        # epnl = 0.55 * 0.29 - 0.45 * 0.70 = 0.1595 - 0.315 = -0.1555 → not +EV
-        # at NO@0.30: eff_yes = 1-0.30-0.01=0.69, no_cost=0.30
-        # epnl = 0.55 * 0.69 - 0.45 * 0.30 = 0.3795 - 0.135 = +0.2445 → +EV
-        levels = walk_order_book_ev(asks, base_rate=0.45, config=cfg, max_contracts=100)
-        # Only the NO@0.30 level is +EV
+        levels = walk_order_book_ev(bids, base_rate=0.45, config=cfg, max_contracts=100)
         assert len(levels) == 1
-        assert levels[0]["no_price"] == 0.30
+        assert abs(levels[0]["no_price"] - 0.30) < 1e-6  # 1 - 0.70
 
     def test_respects_max_contracts(self):
         """Stops when max_contracts is reached."""
-        asks = self._make_asks([(0.60, 100)])
+        bids = self._make_yes_bids([(0.40, 100)])
         cfg = {"fee": 0.0, "slippage": 0.01}
-        levels = walk_order_book_ev(asks, base_rate=0.10, config=cfg, max_contracts=25)
+        levels = walk_order_book_ev(bids, base_rate=0.10, config=cfg, max_contracts=25)
         assert len(levels) == 1
         assert levels[0]["size"] == 25
 
-    def test_empty_asks(self):
-        """No asks → no levels."""
+    def test_empty_bids(self):
+        """No YES bids → no levels."""
         levels = walk_order_book_ev(
             [], base_rate=0.10, config={"fee": 0.0, "slippage": 0.01},
             max_contracts=100)
@@ -605,10 +598,10 @@ class TestWalkOrderBookEv:
 
     def test_all_negative_ev(self):
         """All levels are -EV → empty result."""
-        # base_rate=0.90 → almost always YES wins → NO is -EV
-        asks = self._make_asks([(0.20, 10)])
+        # YES bid at 0.80 → NO@0.20, base_rate=0.90 → -EV
+        bids = self._make_yes_bids([(0.80, 10)])
         cfg = {"fee": 0.0, "slippage": 0.01}
-        levels = walk_order_book_ev(asks, base_rate=0.90, config=cfg, max_contracts=100)
+        levels = walk_order_book_ev(bids, base_rate=0.90, config=cfg, max_contracts=100)
         assert levels == []
 
 
@@ -619,22 +612,20 @@ class TestWalkOrderBookEv:
 class TestFokEvGating:
     """Verify that the strategy only sends FOK when +EV at executable price."""
 
-    def test_positive_ev_at_best_ask(self):
-        """If best NO ask gives +EV, walk_order_book_ev returns it."""
-        ask = MockOrderSummary(price="0.60", size="50")
+    def test_positive_ev_at_best_bid(self):
+        """If best YES bid gives +EV for NO, walk_order_book_ev returns it."""
+        bid = MockOrderSummary(price="0.40", size="50")  # NO @ 0.60
         cfg = {"fee": 0.0, "slippage": 0.01}
-        levels = walk_order_book_ev([ask], base_rate=0.20, config=cfg, max_contracts=50)
+        levels = walk_order_book_ev([bid], base_rate=0.20, config=cfg, max_contracts=50)
         assert len(levels) == 1
         assert levels[0]["epnl"] > 0
 
-    def test_negative_ev_at_best_ask(self):
-        """If best NO ask is -EV, no FOK should be sent."""
-        ask = MockOrderSummary(price="0.10", size="50")
+    def test_negative_ev_at_best_bid(self):
+        """If best YES bid makes NO trade -EV, no FOK should be sent."""
+        bid = MockOrderSummary(price="0.10", size="50")  # NO @ 0.90
         cfg = {"fee": 0.0, "slippage": 0.01}
-        # NO@0.10 → YES=0.90 → base_rate=0.85 → high BR, small edge
-        # epnl = 0.15 * (0.90-0.01) - 0.85 * 0.10 = 0.1335 - 0.085 = +0.048 → actually +EV
-        # Let's use base_rate=0.95 instead
-        levels = walk_order_book_ev([ask], base_rate=0.95, config=cfg, max_contracts=50)
+        # YES=0.10, base_rate=0.95 → -EV
+        levels = walk_order_book_ev([bid], base_rate=0.95, config=cfg, max_contracts=50)
         assert levels == []
 
 

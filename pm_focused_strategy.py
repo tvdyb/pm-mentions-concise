@@ -49,7 +49,7 @@ PM_CONFIG = {
 
     # Category exclusions — on PM, political_person is the profitable segment
     # and earnings is strongly negative (opposite of Kalshi!)
-    "exclude_categories": ["earnings"],
+    "exclude_categories": ["earnings", "monthly", "weekly"],
 
     # Speaker exclusions — backtest shows these are break-even to negative
     "exclude_speakers": ["starmer", "vance"],
@@ -60,13 +60,16 @@ PM_CONFIG = {
 
     # Position sizing
     "kelly_fraction": 0.25,
-    "max_position_pct": 0.05,
+    "max_position_pct": 0.02,
     "max_total_exposure_pct": 0.80,
     "max_per_event_pct": 0.20,
 
     # Costs — Polymarket has no fees
     "fee": 0.0,
     "slippage": 0.01,
+
+    # Execution filters
+    "max_no_spread": 0.05,          # skip markets with NO spread > 5c
 
     # Volume filter
     "min_volume": 0.0,              # minimum volume to consider
