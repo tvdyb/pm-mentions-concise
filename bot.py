@@ -165,11 +165,14 @@ def _check_settlements(state: dict, config: dict) -> None:
         # Compute realized PnL
         n = pos.get("n_contracts", 0)
         total_cost = pos.get("total_cost", 0.0)
-        avg_entry = total_cost / n if n > 0 else 0.0
+        avg_no = total_cost / n if n > 0 else 0.0
 
-        # Use compute_settlement_pnl from shared.py
+        # compute_settlement_pnl expects the YES entry price, not NO cost.
+        # record_trade stores yes_price; fall back to 1 - avg_no for old state.
+        yes_entry = pos.get("yes_price", 1.0 - avg_no)
+
         pnl = compute_settlement_pnl(
-            avg_entry, result, side="NO", n_contracts=n,
+            yes_entry, result, side="NO", n_contracts=n,
             fee=config.get("fee", 0.0), slippage=0.0,  # already accounted for
         )
 
@@ -255,7 +258,9 @@ def run_cycle(
     # 5. Execute trades
     max_positions = BOT_CONFIG.get("max_open_positions", 10)
     n_orders = 0
-    remaining_capital = capital
+    # Subtract capital already locked in open positions
+    open_cost = sum(p.get("total_cost", 0.0) for p in state["positions"].values())
+    remaining_capital = capital - open_cost
 
     for sig in signals:
         # Respect position limit
