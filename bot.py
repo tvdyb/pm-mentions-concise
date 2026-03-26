@@ -409,6 +409,15 @@ def main():
     else:
         mode = "live"
 
+    # Build effective config: PM_CONFIG + Polymarket-specific overrides
+    # PM_CONFIG.max_position_pct (2%) was tuned for Kalshi's large account sizes.
+    # On a $100 test wallet that gives only $2 max position (~4 contracts),
+    # which gets blocked by min_order_size. Bump to 10% ($10) for small accounts.
+    # Also, Polymarket has no minimum order size (Kalshi's default is 5).
+    config = dict(PM_CONFIG)
+    config["max_position_pct"] = 0.10
+    config["min_order_size"] = 1
+
     # Load calibration
     cal_path = Path("data/pm_calibration.json")
     if not cal_path.exists():
@@ -438,17 +447,21 @@ def main():
                  len(state["positions"]), len(state["trades"]))
 
     # Banner
-    excluded = PM_CONFIG.get("exclude_speakers", [])
     logger.info("")
     logger.info("=== PM Mentions Bot ===")
     logger.info("  Mode:           %s", mode.upper())
     logger.info("  Capital:        $%.0f", args.capital)
     logger.info("  Max daily loss: $%.0f", args.max_daily_loss)
     logger.info("  Interval:       %ds", args.interval)
+    logger.info("  Max position:   %.0f%% ($%.0f)",
+                 config["max_position_pct"] * 100,
+                 args.capital * config["max_position_pct"])
+    logger.info("  Min order size: %d contracts", config["min_order_size"])
     logger.info("  Edge thresholds: %dc/%dc/%dc (high-N/low-N/category)",
-                 int(PM_CONFIG["edge_min_speaker_high_n"] * 100),
-                 int(PM_CONFIG["edge_min_speaker_low_n"] * 100),
-                 int(PM_CONFIG["edge_min_category"] * 100))
+                 int(config["edge_min_speaker_high_n"] * 100),
+                 int(config["edge_min_speaker_low_n"] * 100),
+                 int(config["edge_min_category"] * 100))
+    excluded = config.get("exclude_speakers", [])
     if excluded:
         logger.info("  Excluded:       %s", ", ".join(excluded))
     logger.info("")
@@ -457,7 +470,7 @@ def main():
     while True:
         try:
             run_cycle(
-                client, calibration, PM_CONFIG, state,
+                client, calibration, config, state,
                 capital=args.capital,
                 max_daily_loss=args.max_daily_loss,
                 mode=mode,
