@@ -46,6 +46,7 @@ BOT_CONFIG = {
     "scan_interval": 180,
     "max_contracts_per_level": 50,
     "max_open_positions": 10,
+    "max_positions_per_speaker": 5,
     "min_order_size": 5,
     "telegram_bot_token": os.environ.get("TG_BOT_TOKEN", ""),
     "telegram_chat_id": os.environ.get("TG_CHAT_ID", ""),
@@ -99,7 +100,11 @@ def create_client(private_key: str | None = None, max_retries: int = 3):
         raise ValueError(
             "No private key. Set POLYMARKET_PRIVATE_KEY env var.")
 
-    client = ClobClient(CLOB_HOST, key=key, chain_id=CHAIN_ID)
+    funder = os.environ.get("POLYMARKET_FUNDER", BOT_CONFIG.get("funder", ""))
+    client = ClobClient(
+        CLOB_HOST, key=key, chain_id=CHAIN_ID,
+        signature_type=1, funder=funder,
+    )
 
     for attempt in range(max_retries):
         try:
@@ -233,15 +238,15 @@ def enrich_with_order_book(client, markets: list[dict]) -> list[dict]:
         if not yes_bids:
             continue
 
-        # CLOB returns bids descending (best first), asks ascending (best first)
-        best_bid = float(yes_bids[0].price)
-        best_ask = float(yes_asks[0].price) if yes_asks else 1.0
-        spread = best_ask - best_bid
+        # Find best bid (highest) and best ask (lowest)
+        best_bid = max(float(b.price) for b in yes_bids)
+        best_ask = min(float(a.price) for a in yes_asks) if yes_asks else None
+        spread = (best_ask - best_bid) if best_ask is not None else 0.0
 
         mkt = dict(mkt)  # shallow copy
         mkt["yes_book"] = yes_book
         mkt["yes_best_bid"] = best_bid
-        mkt["yes_best_ask"] = best_ask
+        mkt["yes_best_ask"] = best_ask if best_ask is not None else 1.0
         mkt["yes_spread"] = spread
         mkt["no_best_ask"] = 1.0 - best_bid
         mkt["no_spread"] = spread
@@ -265,8 +270,7 @@ def walk_order_book_ev(
     """Walk YES bids from highest to lowest, taking only +EV levels for NO.
 
     Args:
-        yes_bids: Bid objects with .price and .size (strings), sorted
-                  ascending (CLOB format).
+        yes_bids: Bid objects with .price and .size (strings).
         base_rate: Historical probability of YES outcome.
         config: Dict with 'fee' and 'slippage' keys.
         max_contracts: Maximum total contracts to take across all levels.
@@ -288,8 +292,9 @@ def walk_order_book_ev(
     levels: list[dict] = []
     remaining = max_contracts
 
-    # CLOB returns bids descending (highest first) — walk top-down
-    for bid in yes_bids:
+    # Sort bids descending (highest first) so we walk best prices first
+    sorted_bids = sorted(yes_bids, key=lambda b: float(b.price), reverse=True)
+    for bid in sorted_bids:
         if remaining <= 0:
             break
 
@@ -363,6 +368,13 @@ def execute_fok_no(
         )
         result = client.post_order(signed_order, orderType=OrderType.FOK)
         logger.info("  Order response: %s", result)
+
+        # Validate FOK result
+        status = (result or {}).get("status", "")
+        if status and status.upper() not in ("MATCHED", "FILLED", "LIVE", ""):
+            logger.warning("  FOK unexpected status: %s — treating as failed", status)
+            return None
+
         return result
     except Exception as e:
         logger.error("FOK order failed: %s", e)
@@ -432,8 +444,10 @@ def record_trade(
         "order_id": (order_response or {}).get("orderID", ""),
     })
 
-    # Update daily PnL (cost is cash outflow)
-    state["daily_pnl"][today] = state["daily_pnl"].get(today, 0.0) - total_cost
+    # Track daily cost separately from realized PnL
+    daily_cost = state.get("daily_cost", {})
+    daily_cost[today] = daily_cost.get(today, 0.0) + total_cost
+    state["daily_cost"] = daily_cost
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +460,11 @@ def check_daily_loss(
 ) -> tuple[bool, float]:
     """Check if daily loss limit has been breached.
 
+    Compares realized PnL only (not unrealized open position costs).
+
     Returns (ok, daily_pnl):
-        ok=True  if today's PnL > -max_daily_loss (safe to trade)
-        ok=False if today's PnL <= -max_daily_loss (breached)
+        ok=True  if today's realized PnL > -max_daily_loss (safe to trade)
+        ok=False if today's realized PnL <= -max_daily_loss (breached)
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     daily_pnl = state.get("daily_pnl", {}).get(today, 0.0)
@@ -468,7 +484,7 @@ def load_positions(path: str | None = None) -> dict:
                 return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load state from %s: %s", state_path, e)
-    return {"positions": {}, "trades": [], "daily_pnl": {}}
+    return {"positions": {}, "trades": [], "daily_pnl": {}, "daily_cost": {}}
 
 
 def save_positions(state: dict, path: str | None = None) -> None:

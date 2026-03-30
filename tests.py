@@ -635,7 +635,7 @@ class TestFokEvGating:
 
 class TestPositionTracking:
     def test_record_trade_creates_position(self):
-        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+        state = {"positions": {}, "trades": [], "daily_pnl": {}, "daily_cost": {}}
         record_trade(state, "cond_abc", "Bitcoin", "trump",
                      10, 0.70, 7.0, {"orderID": "ord123"})
         assert "cond_abc" in state["positions"]
@@ -646,7 +646,7 @@ class TestPositionTracking:
         assert len(state["trades"]) == 1
 
     def test_record_trade_accumulates(self):
-        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+        state = {"positions": {}, "trades": [], "daily_pnl": {}, "daily_cost": {}}
         record_trade(state, "cond_abc", "Bitcoin", "trump", 10, 0.70, 7.0, None)
         record_trade(state, "cond_abc", "Bitcoin", "trump", 5, 0.65, 3.25, None)
         pos = state["positions"]["cond_abc"]
@@ -654,13 +654,15 @@ class TestPositionTracking:
         assert abs(pos["total_cost"] - 10.25) < 1e-6
         assert len(state["trades"]) == 2
 
-    def test_daily_pnl_tracked(self):
-        state = {"positions": {}, "trades": [], "daily_pnl": {}}
+    def test_daily_cost_tracked(self):
+        state = {"positions": {}, "trades": [], "daily_pnl": {}, "daily_cost": {}}
         record_trade(state, "c1", "Word1", "trump", 10, 0.70, 7.0, None)
         record_trade(state, "c2", "Word2", "trump", 5, 0.60, 3.0, None)
         from datetime import datetime, timezone
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        assert abs(state["daily_pnl"][today] - (-10.0)) < 1e-6
+        # Cost tracked separately; daily_pnl only has realized PnL (none yet)
+        assert abs(state["daily_cost"][today] - 10.0) < 1e-6
+        assert state["daily_pnl"].get(today, 0.0) == 0.0
 
 
 # ---------------------------------------------------------------------------

@@ -26,12 +26,19 @@ OUT_PATH = Path("data/pm_resolved_markets.json")
 def parse_speaker(title: str) -> str:
     """Extract speaker name from event title."""
     t = title.lower()
-    m = re.search(r'what will (.+?) (?:say|post|tweet)', t)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r'will (.+?) (?:say|mention|tweet)', t)
-    if m:
-        return m.group(1).strip()
+    patterns = [
+        r'what will (.+?) (?:say|post|tweet|mention|discuss)',
+        r'will (.+?) (?:say|mention|tweet|post|discuss)',
+        r'(.+?)(?:\'s| —) (?:press conference|speech|address|remarks|pmqs)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, t)
+        if m:
+            speaker = m.group(1).strip()
+            for prefix in ["president ", "vice president ", "secretary "]:
+                if speaker.startswith(prefix):
+                    speaker = speaker[len(prefix):]
+            return speaker
     return ""
 
 

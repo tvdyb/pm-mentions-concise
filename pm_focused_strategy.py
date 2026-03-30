@@ -19,6 +19,9 @@ Usage:
     signals = compute_signals(markets, cal)
 """
 
+import os
+import time
+
 from pm_base_rates import find_speaker_rate, find_category_rate, _normalize_speaker
 from pm_transcript_rates import find_transcript_rate, load_transcript_rates, OUT_PATH
 from shared import compute_expected_pnl
@@ -81,6 +84,9 @@ PM_CONFIG = {
     # Edge threshold for transcript-backed signals — most precise rate source,
     # so we can use a tighter threshold than speaker-level.
     "edge_min_transcript": 0.04,
+
+    # Transcript data staleness — skip transcript rates if data is older than this
+    "max_transcript_age_days": 180,
 }
 
 
@@ -126,12 +132,23 @@ def compute_signals(
 
     # Load transcript word-level rates if available
     transcript_rates = {}
+    transcript_stale = False
     if OUT_PATH.exists():
         try:
             transcript_rates = load_transcript_rates()
         except (ValueError, OSError) as e:
             import warnings
             warnings.warn(f"Failed to load transcript rates: {e}")
+
+    # Check transcript data age
+    if transcript_rates and OUT_PATH.exists():
+        age_days = (time.time() - os.path.getmtime(OUT_PATH)) / 86400
+        max_age = cfg.get("max_transcript_age_days", 180)
+        if age_days > max_age:
+            import warnings
+            warnings.warn(f"Transcript data is {age_days:.0f} days old (max {max_age}). "
+                          f"Falling back to speaker rates. Run pm_transcript_rates.py to refresh.")
+            transcript_stale = True
 
     for mkt in active_markets:
         yes_mid = mkt["yes_mid"]
@@ -167,7 +184,7 @@ def compute_signals(
 
         # Transcript word-level rate (highest precision — political LibFrog)
         strike_word = mkt.get("strike_word", "")
-        if transcript_rates and speaker and strike_word:
+        if transcript_rates and not transcript_stale and speaker and strike_word:
             tx_rate = find_transcript_rate(
                 speaker, strike_word, transcript_rates,
                 min_events=min_tx_events)

@@ -17,8 +17,10 @@ Environment variables:
 """
 
 import argparse
+import hashlib
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -176,8 +178,8 @@ def _check_settlements(state: dict, config: dict) -> None:
             fee=config.get("fee", 0.0), slippage=0.0,  # already accounted for
         )
 
-        # Update daily PnL (add back cost + realized pnl)
-        state["daily_pnl"][today] = state["daily_pnl"].get(today, 0.0) + total_cost + pnl
+        # Record realized PnL only (cost was tracked separately at open time)
+        state["daily_pnl"][today] = state["daily_pnl"].get(today, 0.0) + pnl
         daily_pnl_val = state["daily_pnl"].get(today, 0.0)
 
         logger.info("  SETTLED: %s -> %s | PnL: $%.2f (%d contracts)",
@@ -281,14 +283,29 @@ def run_cycle(
             logger.debug("  Skip %s — already positioned", sig["strike_word"][:30])
             continue
 
+        # Speaker concentration check
+        speaker = sig.get("speaker", "")
+        speaker_positions = sum(
+            1 for p in state["positions"].values()
+            if p.get("speaker", "").lower() == speaker.lower()
+        )
+        max_per_speaker = BOT_CONFIG.get("max_positions_per_speaker", 5)
+        if speaker_positions >= max_per_speaker:
+            logger.debug("  Skip %s — speaker cap (%d/%d)", sig["strike_word"][:30],
+                         speaker_positions, max_per_speaker)
+            continue
+
         # Size position
         n_contracts, cost = size_position(sig, remaining_capital, config)
         if n_contracts < 1:
+            logger.debug("  Skip %s — sizing returned 0 (remaining=$%.2f, kelly=%.3f)",
+                         sig["strike_word"][:30], remaining_capital, sig["kelly_quarter"])
             continue
 
         # Find market with order book
         mkt = next((m for m in markets if m.get("ticker") == cid or m.get("condition_id") == cid), None)
         if not mkt:
+            logger.debug("  Skip %s — market not found in enriched list", sig["strike_word"][:30])
             continue
 
         # Walk order book for +EV levels
@@ -301,7 +318,8 @@ def run_cycle(
                 max_contracts=min(n_contracts, max_contracts_per))
 
             if not ev_levels:
-                logger.debug("  No +EV liquidity for %s", sig["strike_word"][:30])
+                logger.debug("  Skip %s — no +EV liquidity in book (%d bids)",
+                             sig["strike_word"][:30], len(yes_bids))
                 continue
 
             ev_contracts = sum(lv["size"] for lv in ev_levels)
@@ -321,12 +339,15 @@ def run_cycle(
 
         min_order = config.get("min_order_size", 5)
         if ev_contracts < min_order:
+            logger.debug("  Skip %s — ev_contracts=%d < min_order=%d",
+                         sig["strike_word"][:30], int(ev_contracts), min_order)
             continue
 
         # Skip wide spreads
         max_spread = config.get("max_no_spread", 0.05)
         if mkt.get("no_spread", 0) > max_spread:
-            logger.debug("  Skip %s — spread too wide", sig["strike_word"][:30])
+            logger.debug("  Skip %s — spread %.3f > max %.3f",
+                         sig["strike_word"][:30], mkt.get("no_spread", 0), max_spread)
             continue
 
         logger.info("")
@@ -409,6 +430,11 @@ def main():
     else:
         mode = "live"
 
+    # Fail early if live mode without private key
+    if mode == "live" and not os.environ.get("POLYMARKET_PRIVATE_KEY"):
+        logger.error("POLYMARKET_PRIVATE_KEY not set. Use --dry-run or set the env var.")
+        sys.exit(1)
+
     # Build effective config: PM_CONFIG + Polymarket-specific overrides
     # PM_CONFIG.max_position_pct (2%) was tuned for Kalshi's large account sizes.
     # On a $100 test wallet that gives only $2 max position (~4 contracts),
@@ -443,8 +469,19 @@ def main():
 
     # Load state
     state = load_positions()
+    # Ensure daily_cost exists for older state files
+    if "daily_cost" not in state:
+        state["daily_cost"] = {}
     logger.info("Loaded state: %d open positions, %d historical trades",
                  len(state["positions"]), len(state["trades"]))
+
+    # Reconcile positions that may have settled while bot was offline
+    if state["positions"]:
+        logger.info("Reconciling %d open positions...", len(state["positions"]))
+        _check_settlements(state, config)
+        save_positions(state)
+        logger.info("  %d positions remain after reconciliation",
+                     len(state["positions"]))
 
     # Banner
     logger.info("")
@@ -464,6 +501,9 @@ def main():
     excluded = config.get("exclude_speakers", [])
     if excluded:
         logger.info("  Excluded:       %s", ", ".join(excluded))
+    config_str = json.dumps(config, sort_keys=True)
+    config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
+    logger.info("  Config hash:    %s", config_hash)
     logger.info("")
 
     # Main loop
