@@ -133,6 +133,7 @@ def compute_signals(
     slip = cfg["slippage"]
     min_vol = cfg.get("min_volume", 0.0)
     max_vol = cfg.get("max_volume", float("inf"))
+    max_trend = cfg.get("max_price_trend", 0.05)
     exclude_cats = set(cfg.get("exclude_categories", []))
     exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
 
@@ -174,7 +175,6 @@ def compute_signals(
             continue
 
         # --- Price trend filter ---
-        max_trend = cfg.get("max_price_trend", 0.05)
         price_trend = mkt.get("price_trend")
         if price_trend is not None and price_trend > max_trend:
             continue
@@ -276,15 +276,6 @@ def compute_signals(
             "total_bid_depth": mkt.get("total_bid_depth"),
             "n_bid_levels": mkt.get("n_bid_levels"),
         })
-
-    # --- Intra-event correlation: boost edge when multiple markets in same event signal NO ---
-    event_counts: dict[str, int] = {}
-    for sig in signals:
-        evt = sig.get("event_ticker", "")
-        if evt:
-            event_counts[evt] = event_counts.get(evt, 0) + 1
-    for sig in signals:
-        sig["event_no_count"] = event_counts.get(sig.get("event_ticker", ""), 0)
 
     signals.sort(key=lambda s: s["expected_pnl"], reverse=True)
     return signals

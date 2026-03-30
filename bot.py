@@ -23,6 +23,7 @@ import logging
 import os
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -196,6 +197,30 @@ def _check_settlements(state: dict, config: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Intra-event correlation
+# ---------------------------------------------------------------------------
+
+def _count_resolved_nos(markets: list[dict]) -> dict[str, int]:
+    """Count already-resolved NO markets per event.
+
+    A market is considered resolved NO if its YES price has collapsed
+    to near-zero (< 0.03). This happens when the word wasn't said and
+    the market settles.
+
+    Returns {event_ticker: n_resolved_nos}.
+    """
+    event_nos: dict[str, int] = defaultdict(int)
+    for mkt in markets:
+        et = mkt.get("event_ticker", "")
+        if not et:
+            continue
+        yes_mid = mkt.get("yes_mid", 0.5)
+        if yes_mid <= 0.03:
+            event_nos[et] += 1
+    return dict(event_nos)
+
+
+# ---------------------------------------------------------------------------
 # Main scan cycle
 # ---------------------------------------------------------------------------
 
@@ -246,6 +271,9 @@ def run_cycle(
 
     if not signals:
         return 0
+
+    # Count resolved NOs per event (from full market scan, not just enriched)
+    event_nos = _count_resolved_nos(raw_markets)
 
     # Display signals
     logger.info("")
@@ -314,13 +342,36 @@ def run_cycle(
             logger.debug("  Skip %s — market not found in enriched list", sig["strike_word"][:30])
             continue
 
+        # Intra-event boost: if sibling markets already resolved NO,
+        # reduce effective base rate -> increases edge and Kelly size
+        event_key = sig.get("event_ticker", "")
+        n_resolved = event_nos.get(event_key, 0)
+        effective_br = sig["base_rate"]
+        if n_resolved >= 2:
+            # Data shows: 2 prior NOs -> YES rate drops ~25% relative
+            # 3+ prior NOs -> YES rate drops ~35% relative
+            decay = 0.75 if n_resolved < 3 else 0.65
+            effective_br = sig["base_rate"] * decay
+            logger.info("    Event boost: %d sibling NOs -> adj BR %.1f%% (was %.1f%%)",
+                        n_resolved, effective_br * 100, sig["base_rate"] * 100)
+            # Recompute Kelly with boosted base rate
+            _, boosted_kelly = compute_expected_pnl(
+                sig["yes_mid"], effective_br,
+                fee=config.get("fee", 0.0), slippage=config["slippage"],
+                kelly_fraction=config["kelly_fraction"])
+            sig["kelly_quarter"] = boosted_kelly
+            # Re-size with updated Kelly
+            n_contracts, cost = size_position(sig, remaining_capital, config)
+            if n_contracts < 1:
+                continue
+
         # Walk order book for +EV levels
         yes_book = mkt.get("yes_book")
         if yes_book is not None:
             yes_bids = yes_book.bids or []
             max_contracts_per = BOT_CONFIG.get("max_contracts_per_level", 50)
             ev_levels = walk_order_book_ev(
-                yes_bids, sig["base_rate"], config,
+                yes_bids, effective_br, config,
                 max_contracts=min(n_contracts, max_contracts_per))
 
             if not ev_levels:

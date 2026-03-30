@@ -250,11 +250,15 @@ def enrich_with_order_book(client, markets: list[dict]) -> list[dict]:
         mkt["yes_spread"] = spread
         mkt["no_best_ask"] = 1.0 - best_bid
         mkt["no_spread"] = spread
-        mkt["total_bid_depth"] = sum(float(b.size) for b in yes_bids)
+        mkt["total_bid_depth"] = sum(float(b.price) * float(b.size) for b in yes_bids[:10])
         mkt["n_bid_levels"] = len(yes_bids)
         # Price trend: CLOB midpoint vs Gamma yes_mid (positive = price drifting up)
-        clob_mid = (best_bid + (best_ask if best_ask is not None else best_bid)) / 2
-        mkt["price_trend"] = clob_mid - mkt.get("yes_mid", clob_mid)
+        # Only compute if we have both sides of the book
+        if best_ask is not None:
+            clob_mid = (best_bid + best_ask) / 2
+            mkt["price_trend"] = clob_mid - mkt.get("yes_mid", clob_mid)
+        else:
+            mkt["price_trend"] = None  # insufficient data to determine trend
         enriched.append(mkt)
 
         time.sleep(0.15)  # rate-limit

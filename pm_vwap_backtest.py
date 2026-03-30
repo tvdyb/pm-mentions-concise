@@ -249,6 +249,7 @@ def run_param_grid(markets, cfg, transcript_rates=None):
     edge_sp_high_vals = [0.02, 0.04, 0.06, 0.08]
     edge_sp_low_vals = [0.04, 0.06, 0.08, 0.10]
     edge_tx_vals = [0.02, 0.04, 0.06, 0.08]
+    max_vol_vals = [5_000, 10_000, None]  # None = no filter (float("inf"))
 
     # Run with loosest params to get all possible trades
     loose = dict(cfg)
@@ -257,16 +258,22 @@ def run_param_grid(markets, cfg, transcript_rates=None):
     loose["edge_min_speaker_low_n"] = min(edge_sp_low_vals)
     loose["edge_min_transcript"] = min(edge_tx_vals)
     loose["edge_min_category"] = 0.04
+    loose["max_volume"] = float("inf")  # no volume cap for the superset
 
     all_trades = run_pm_vwap_backtest(
         markets, loose, transcript_rates, price_keys=[PK_PRIMARY])
 
     results = []
-    for my, esh, esl, etx in itertools.product(
-            max_yes_vals, edge_sp_high_vals, edge_sp_low_vals, edge_tx_vals):
+    for my, esh, esl, etx, mvol in itertools.product(
+            max_yes_vals, edge_sp_high_vals, edge_sp_low_vals,
+            edge_tx_vals, max_vol_vals):
+        effective_mvol = mvol if mvol is not None else float("inf")
         pnls = []
         for t in all_trades:
             if not t["passed"].get(PK_PRIMARY):
+                continue
+            # Volume filter
+            if t.get("volume", 0) > effective_mvol:
                 continue
             price = t["entry"][PK_PRIMARY]
             if price > my:
@@ -289,7 +296,7 @@ def run_param_grid(markets, cfg, transcript_rates=None):
         if n == 0:
             results.append({
                 "max_yes": my, "edge_sp_high": esh, "edge_sp_low": esl,
-                "edge_tx": etx, "n": 0, "win_rate": 0,
+                "edge_tx": etx, "max_vol": mvol, "n": 0, "win_rate": 0,
                 "mean_pnl": 0, "sharpe": 0, "total_pnl": 0,
             })
             continue
@@ -298,7 +305,7 @@ def run_param_grid(markets, cfg, transcript_rates=None):
         std = float(np.std(arr, ddof=1)) if n > 1 else 0.0
         results.append({
             "max_yes": my, "edge_sp_high": esh, "edge_sp_low": esl,
-            "edge_tx": etx, "n": n,
+            "edge_tx": etx, "max_vol": mvol, "n": n,
             "win_rate": float(np.mean(arr > 0)),
             "mean_pnl": float(np.mean(arr)),
             "sharpe": float(np.mean(arr) / std) if std > 0 else 0.0,
@@ -333,10 +340,12 @@ def generate_report(trades, markets, param_results, cfg):
                  f"{n_with_vwap:,} with VWAP), "
                  f"{end_dates[0][:10]} to {end_dates[-1][:10]}.*")
     lines.append("")
+    max_vol_cfg = cfg.get("max_volume", float("inf"))
+    vol_note = f" Volume cap: ${max_vol_cfg:,.0f}." if max_vol_cfg != float("inf") else ""
     lines.append("All results use **real VWAP 25% buffer** entry prices from "
                  "CLOB trade history and **rolling speaker base rates** "
                  "(no look-ahead). Polymarket has **zero fees**; "
-                 "1c slippage assumed. Per-trade Sharpe = mean/std.")
+                 f"1c slippage assumed.{vol_note} Per-trade Sharpe = mean/std.")
 
     # ===== EXECUTIVE SUMMARY =====
     lines.append("")
@@ -508,11 +517,34 @@ def generate_report(trades, markets, param_results, cfg):
     b_stats = [compute_stats(p, b) for b, p in sorted(buckets.items())]
     lines.append(fmt_stats_table(b_stats))
 
+    # ===== VOLUME BREAKDOWN =====
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 8. Volume Breakdown")
+    lines.append("")
+
+    vol_buckets = {"$0-1K": [], "$1K-5K": [], "$5K-10K": [], "$10K+": []}
+    for t in trades:
+        if not t["passed"].get(pk):
+            continue
+        v = t.get("volume", 0)
+        if v < 1000:
+            vol_buckets["$0-1K"].append(t["pnl"][pk])
+        elif v < 5000:
+            vol_buckets["$1K-5K"].append(t["pnl"][pk])
+        elif v < 10000:
+            vol_buckets["$5K-10K"].append(t["pnl"][pk])
+        else:
+            vol_buckets["$10K+"].append(t["pnl"][pk])
+    v_stats = [compute_stats(p, b) for b, p in sorted(vol_buckets.items())]
+    lines.append(fmt_stats_table(v_stats))
+
     # ===== EDGE DECAY =====
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## 8. Edge Decay (Chronological Splits)")
+    lines.append("## 9. Edge Decay (Chronological Splits)")
     lines.append("")
 
     if n_traded >= 8:
@@ -547,26 +579,30 @@ def generate_report(trades, markets, param_results, cfg):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## 9. Parameter Sensitivity Grid")
+    lines.append("## 10. Parameter Sensitivity Grid (with Volume)")
     lines.append("")
-    lines.append("256 combos tested (4 values each for max_yes, edge_sp_high, "
-                 "edge_sp_low, edge_transcript). Sorted by Sharpe.")
+    lines.append("768 combos tested (4 values each for max_yes, edge_sp_high, "
+                 "edge_sp_low, edge_transcript; 3 values for max_volume). "
+                 "Sorted by Sharpe.")
     lines.append("")
 
     valid = [r for r in param_results if r["n"] >= 20]
     valid.sort(key=lambda r: r["sharpe"], reverse=True)
 
     if valid:
-        header = ["max_yes", "edge_hi", "edge_lo", "edge_tx", "N",
-                  "Win Rate", "Mean PnL", "Sharpe", "Total PnL"]
+        header = ["max_yes", "edge_hi", "edge_lo", "edge_tx", "max_vol",
+                  "N", "Win Rate", "Mean PnL", "Sharpe", "Total PnL"]
 
         lines.append("### Top 20 by Sharpe (N >= 20)")
         lines.append("")
         rows = []
         for r in valid[:20]:
+            mvol = r.get("max_vol")
+            vol_str = f"${mvol/1000:.0f}K" if mvol is not None else "none"
             rows.append((
                 f"{r['max_yes']:.0%}", f"{r['edge_sp_high']:.0%}",
                 f"{r['edge_sp_low']:.0%}", f"{r['edge_tx']:.0%}",
+                vol_str,
                 str(r["n"]), f"{r['win_rate']:.1%}",
                 f"${r['mean_pnl']:+.4f}", f"{r['sharpe']:.4f}",
                 f"${r['total_pnl']:+.1f}",
@@ -586,7 +622,7 @@ def generate_report(trades, markets, param_results, cfg):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## 10. Kill Criteria")
+    lines.append("## 11. Kill Criteria")
     lines.append("")
     lines.append("Stop trading if:")
     lines.append("")
@@ -608,7 +644,7 @@ def generate_report(trades, markets, param_results, cfg):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## 11. PM vs Kalshi Comparison")
+    lines.append("## 12. PM vs Kalshi Comparison")
     lines.append("")
     lines.append("*Compare with focused_backtest_report.md for Kalshi results.*")
     lines.append("")
@@ -642,7 +678,7 @@ def generate_report(trades, markets, param_results, cfg):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## 12. Methodology Notes")
+    lines.append("## 13. Methodology Notes")
     lines.append("")
     lines.append(f"- **Entry prices**: Real VWAP from CLOB trade history "
                  f"(25% buffer = exclude first/last 25% of trading time)")
@@ -664,7 +700,7 @@ def generate_report(trades, markets, param_results, cfg):
                  f"{', '.join(cfg['exclude_categories']) or 'none'}")
     lines.append(f"- **Min speaker history**: {cfg['min_speaker_n']} markets")
     lines.append(f"- **Bootstrap**: 10,000 resamples, seed=42")
-    lines.append(f"- **Parameter grid**: 256 combos")
+    lines.append(f"- **Parameter grid**: 768 combos (incl. volume)")
 
     return "\n".join(lines)
 
@@ -737,7 +773,7 @@ def main():
         print("\n  No trades passed the filter.")
 
     # --- Parameter grid ---
-    print("\nRunning parameter sensitivity grid (256 combos)...")
+    print("\nRunning parameter sensitivity grid (768 combos)...")
     param_results = run_param_grid(markets, cfg, transcript_rates)
     valid = [r for r in param_results if r["n"] >= 20]
     pos = [r for r in valid if r["sharpe"] > 0]

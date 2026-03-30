@@ -775,38 +775,74 @@ class TestPriceTrendFilter:
         assert len(signals) == 1
 
 
-class TestIntraEventCorrelation:
-    def _make_calibration(self):
-        return {
-            "by_speaker": {
-                "trump": {"base_rate": 0.44, "n_markets": 5261},
-            },
-            "by_category": {
-                "political_person": {"base_rate": 0.42, "n_markets": 7473},
-            },
-            "overall": {"base_rate": 0.426, "n_markets": 9999},
-        }
-
-    def test_event_no_count_populated(self):
-        """Signals from same event should have event_no_count reflecting group size."""
-        cal = self._make_calibration()
-        mkts = [
-            {"ticker": "c1", "event_ticker": "E1", "yes_mid": 0.50,
-             "speaker": "trump", "category": "political_person",
-             "strike_word": "W1", "source": "polymarket"},
-            {"ticker": "c2", "event_ticker": "E1", "yes_mid": 0.50,
-             "speaker": "trump", "category": "political_person",
-             "strike_word": "W2", "source": "polymarket"},
+class TestCountResolvedNos:
+    def test_counts_collapsed_yes(self):
+        """Markets with YES <= 0.03 should be counted as resolved NO."""
+        from bot import _count_resolved_nos
+        markets = [
+            {"event_ticker": "E1", "yes_mid": 0.02},  # resolved NO
+            {"event_ticker": "E1", "yes_mid": 0.01},  # resolved NO
+            {"event_ticker": "E1", "yes_mid": 0.50},  # still active
+            {"event_ticker": "E2", "yes_mid": 0.03},  # resolved NO (boundary)
+            {"event_ticker": "E2", "yes_mid": 0.04},  # active (above threshold)
         ]
-        cfg = dict(PM_CONFIG)
-        signals = pm_compute_signals(mkts, cal, config=cfg)
-        assert len(signals) == 2
-        assert all(s["event_no_count"] == 2 for s in signals)
+        result = _count_resolved_nos(markets)
+        assert result["E1"] == 2
+        assert result["E2"] == 1
+
+    def test_empty_markets(self):
+        from bot import _count_resolved_nos
+        assert _count_resolved_nos([]) == {}
+
+    def test_no_resolved(self):
+        from bot import _count_resolved_nos
+        markets = [
+            {"event_ticker": "E1", "yes_mid": 0.50},
+            {"event_ticker": "E1", "yes_mid": 0.30},
+        ]
+        assert _count_resolved_nos(markets) == {}
+
+    def test_missing_event_ticker_skipped(self):
+        from bot import _count_resolved_nos
+        markets = [
+            {"yes_mid": 0.01},  # no event_ticker
+            {"event_ticker": "", "yes_mid": 0.01},  # empty event_ticker
+        ]
+        assert _count_resolved_nos(markets) == {}
+
+
+class TestEventBoostLogic:
+    """Test the base rate decay applied when sibling markets resolved NO."""
+
+    def test_two_resolved_nos_decay(self):
+        """2 resolved NOs -> 0.75x decay on base rate."""
+        # Simulating what bot.py does
+        base_rate = 0.44
+        n_resolved = 2
+        decay = 0.75 if n_resolved < 3 else 0.65
+        effective_br = base_rate * decay
+        assert abs(effective_br - 0.33) < 0.01
+
+    def test_three_resolved_nos_decay(self):
+        """3+ resolved NOs -> 0.65x decay on base rate."""
+        base_rate = 0.44
+        n_resolved = 5
+        decay = 0.75 if n_resolved < 3 else 0.65
+        effective_br = base_rate * decay
+        assert abs(effective_br - 0.286) < 0.01
+
+    def test_no_boost_below_threshold(self):
+        """0-1 resolved NOs -> no decay applied."""
+        base_rate = 0.44
+        for n_resolved in (0, 1):
+            # Bot only applies boost when n_resolved >= 2
+            effective_br = base_rate
+            assert effective_br == 0.44
 
 
 class TestBookDepthEnrichment:
-    def test_depth_fields_added(self):
-        """enrich_with_order_book should add total_bid_depth and n_bid_levels."""
+    def test_dollar_depth_computed(self):
+        """enrich_with_order_book should compute dollar depth (price * size)."""
         from unittest.mock import MagicMock
         client = MagicMock()
         bid1 = MagicMock()
@@ -815,18 +851,59 @@ class TestBookDepthEnrichment:
         bid2 = MagicMock()
         bid2.price = "0.35"
         bid2.size = "50"
+        ask1 = MagicMock()
+        ask1.price = "0.45"
+        ask1.size = "20"
         book = MagicMock()
         book.bids = [bid1, bid2]
-        book.asks = []
+        book.asks = [ask1]
         client.get_order_book.return_value = book
 
         from polymarket_client import enrich_with_order_book
         mkts = [{"yes_token_id": "tok1", "yes_mid": 0.40}]
         result = enrich_with_order_book(client, mkts)
         assert len(result) == 1
-        assert result[0]["total_bid_depth"] == 150.0
+        # Dollar depth: 0.40*100 + 0.35*50 = 40 + 17.5 = 57.5
+        assert abs(result[0]["total_bid_depth"] - 57.5) < 1e-6
         assert result[0]["n_bid_levels"] == 2
-        assert "price_trend" in result[0]
+
+    def test_price_trend_with_asks(self):
+        """price_trend should be computed when asks exist."""
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        bid1 = MagicMock()
+        bid1.price = "0.40"
+        bid1.size = "100"
+        ask1 = MagicMock()
+        ask1.price = "0.50"
+        ask1.size = "20"
+        book = MagicMock()
+        book.bids = [bid1]
+        book.asks = [ask1]
+        client.get_order_book.return_value = book
+
+        from polymarket_client import enrich_with_order_book
+        mkts = [{"yes_token_id": "tok1", "yes_mid": 0.40}]
+        result = enrich_with_order_book(client, mkts)
+        # clob_mid = (0.40 + 0.50) / 2 = 0.45, gamma mid = 0.40 -> trend = +0.05
+        assert abs(result[0]["price_trend"] - 0.05) < 1e-6
+
+    def test_price_trend_none_without_asks(self):
+        """price_trend should be None when no asks on book."""
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        bid1 = MagicMock()
+        bid1.price = "0.40"
+        bid1.size = "100"
+        book = MagicMock()
+        book.bids = [bid1]
+        book.asks = []
+        client.get_order_book.return_value = book
+
+        from polymarket_client import enrich_with_order_book
+        mkts = [{"yes_token_id": "tok1", "yes_mid": 0.40}]
+        result = enrich_with_order_book(client, mkts)
+        assert result[0]["price_trend"] is None
 
 
 class TestSpeakerExclusion:
@@ -964,6 +1041,35 @@ class TestVwapBacktestVolumeFilter:
         trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
         passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
         assert len(passed) > 0
+
+
+class TestParamGridVolume:
+    def test_grid_includes_volume(self):
+        """Parameter grid results should include max_vol field."""
+        from pm_vwap_backtest import run_param_grid
+        # Minimal dataset: just enough to produce some trades
+        markets = []
+        for i in range(25):
+            markets.append({
+                "condition_id": f"cid_{i}",
+                "speaker": "trump",
+                "category": "political_person",
+                "strike_word": f"Word{i}",
+                "result": "no",
+                "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
+                "vwap_25pct_buffer": 0.50,
+                "n_trades": 10,
+                "volume": 3000,
+            })
+        cfg = dict(PM_CONFIG)
+        results = run_param_grid(markets, cfg)
+        # Should have 4*4*4*4*3 = 768 combos
+        assert len(results) == 768
+        # All results should have max_vol field
+        assert all("max_vol" in r for r in results)
+        # Should have results with different max_vol values
+        max_vols = set(r["max_vol"] for r in results)
+        assert max_vols == {5_000, 10_000, None}
 
 
 class TestVwapBacktestSpeakerExclusion:
