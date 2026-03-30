@@ -78,6 +78,8 @@ def run_pm_vwap_backtest(
     min_tx_events = cfg.get("min_transcript_events", 10)
     slip = cfg["slippage"]
     fee = cfg.get("fee", 0.0)
+    min_vol = cfg.get("min_volume", 0.0)
+    max_vol = cfg.get("max_volume", float("inf"))
     exclude_cats = set(cfg.get("exclude_categories", []))
     exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
 
@@ -100,6 +102,10 @@ def run_pm_vwap_backtest(
         category = m.get("category", "other")
         strike_word = m.get("strike_word", "")
         outcome = 1 if result == "yes" else 0
+
+        # --- Volume filter ---
+        vol = m.get("volume", 0)
+        vol_excluded = vol < min_vol or vol > max_vol
 
         # --- Category / speaker exclusion ---
         cat_excluded = category in exclude_cats
@@ -156,8 +162,10 @@ def run_pm_vwap_backtest(
             "n_history": n_hist,
             "end_date": m.get("end_date", ""),
             "n_trades": m.get("n_trades", 0),
+            "volume": vol,
             "cat_excluded": cat_excluded,
             "speaker_excluded": speaker_excluded,
+            "vol_excluded": vol_excluded,
             "passed": {},
             "pnl": {},
             "entry": {},
@@ -174,7 +182,7 @@ def run_pm_vwap_backtest(
                 trade_row["passed"][pk] = False
                 continue
 
-            if cat_excluded or speaker_excluded:
+            if cat_excluded or speaker_excluded or vol_excluded:
                 trade_row["passed"][pk] = False
                 continue
 

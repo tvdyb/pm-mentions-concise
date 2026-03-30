@@ -669,6 +669,166 @@ class TestPositionTracking:
 # Speaker exclusion tests
 # ---------------------------------------------------------------------------
 
+class TestMaxVolumeFilter:
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_volume_below_max_passes(self):
+        """Market with volume < max_volume should pass."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=5000)]
+        cfg = dict(PM_CONFIG)
+        cfg["max_volume"] = 10_000
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+    def test_volume_above_max_filtered(self):
+        """Market with volume > max_volume should be filtered out."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=15_000)]
+        cfg = dict(PM_CONFIG)
+        cfg["max_volume"] = 10_000
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 0
+
+    def test_no_max_volume_passes_all(self):
+        """With max_volume=inf, all volumes pass."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=999_999)]
+        cfg = dict(PM_CONFIG)
+        cfg["max_volume"] = float("inf")
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+
+class TestPriceTrendFilter:
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_small_trend_passes(self):
+        """Price trend within limit should pass."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(price_trend=0.02)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+    def test_large_positive_trend_filtered(self):
+        """Large positive price trend (YES drifting up) should be filtered."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(price_trend=0.10)]
+        cfg = dict(PM_CONFIG)
+        cfg["max_price_trend"] = 0.05
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 0
+
+    def test_no_trend_data_passes(self):
+        """Markets without price_trend data should pass (no filter applied)."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market()]  # no price_trend key
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+
+class TestIntraEventCorrelation:
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_event_no_count_populated(self):
+        """Signals from same event should have event_no_count reflecting group size."""
+        cal = self._make_calibration()
+        mkts = [
+            {"ticker": "c1", "event_ticker": "E1", "yes_mid": 0.50,
+             "speaker": "trump", "category": "political_person",
+             "strike_word": "W1", "source": "polymarket"},
+            {"ticker": "c2", "event_ticker": "E1", "yes_mid": 0.50,
+             "speaker": "trump", "category": "political_person",
+             "strike_word": "W2", "source": "polymarket"},
+        ]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 2
+        assert all(s["event_no_count"] == 2 for s in signals)
+
+
+class TestBookDepthEnrichment:
+    def test_depth_fields_added(self):
+        """enrich_with_order_book should add total_bid_depth and n_bid_levels."""
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        bid1 = MagicMock()
+        bid1.price = "0.40"
+        bid1.size = "100"
+        bid2 = MagicMock()
+        bid2.price = "0.35"
+        bid2.size = "50"
+        book = MagicMock()
+        book.bids = [bid1, bid2]
+        book.asks = []
+        client.get_order_book.return_value = book
+
+        from polymarket_client import enrich_with_order_book
+        mkts = [{"yes_token_id": "tok1", "yes_mid": 0.40}]
+        result = enrich_with_order_book(client, mkts)
+        assert len(result) == 1
+        assert result[0]["total_bid_depth"] == 150.0
+        assert result[0]["n_bid_levels"] == 2
+        assert "price_trend" in result[0]
+
+
 class TestSpeakerExclusion:
     def _make_pm_market(self, **overrides):
         base = {
@@ -761,6 +921,50 @@ class TestDailyLossLimit:
 # ---------------------------------------------------------------------------
 # VWAP backtest speaker exclusion test
 # ---------------------------------------------------------------------------
+
+class TestVwapBacktestVolumeFilter:
+    def test_high_volume_excluded(self):
+        """Markets above max_volume should be excluded in VWAP backtest."""
+        markets = []
+        for i in range(25):
+            markets.append({
+                "condition_id": f"cid_{i}",
+                "speaker": "trump",
+                "category": "political_person",
+                "strike_word": f"Word{i}",
+                "result": "no",
+                "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
+                "vwap_25pct_buffer": 0.50,
+                "n_trades": 10,
+                "volume": 15_000,  # above max
+            })
+        cfg = dict(PM_CONFIG)
+        cfg["max_volume"] = 10_000
+        trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
+        passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
+        assert len(passed) == 0
+
+    def test_normal_volume_passes(self):
+        """Markets within volume range should pass in VWAP backtest."""
+        markets = []
+        for i in range(25):
+            markets.append({
+                "condition_id": f"cid_{i}",
+                "speaker": "trump",
+                "category": "political_person",
+                "strike_word": f"Word{i}",
+                "result": "no",
+                "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
+                "vwap_25pct_buffer": 0.50,
+                "n_trades": 10,
+                "volume": 5000,
+            })
+        cfg = dict(PM_CONFIG)
+        cfg["max_volume"] = 10_000
+        trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
+        passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
+        assert len(passed) > 0
+
 
 class TestVwapBacktestSpeakerExclusion:
     def test_excluded_speaker_not_traded(self):

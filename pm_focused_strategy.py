@@ -76,6 +76,11 @@ PM_CONFIG = {
 
     # Volume filter
     "min_volume": 0.0,              # minimum volume to consider
+    "max_volume": 10_000,           # skip hyper-liquid markets (arb-dominated)
+
+    # Price trend filter — skip markets where YES is drifting up (bad for NO)
+    # Positive trend means CLOB midpoint > Gamma mid → price rising
+    "max_price_trend": 0.05,        # skip if YES drifted up > 5c
 
     # Transcript word-level rates (political LibFrog)
     # When available, these give per-word precision instead of speaker average.
@@ -127,6 +132,7 @@ def compute_signals(
     fee = cfg.get("fee", 0.0)
     slip = cfg["slippage"]
     min_vol = cfg.get("min_volume", 0.0)
+    max_vol = cfg.get("max_volume", float("inf"))
     exclude_cats = set(cfg.get("exclude_categories", []))
     exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
 
@@ -163,7 +169,14 @@ def compute_signals(
             continue
 
         # --- Volume filter ---
-        if mkt.get("volume", 0) < min_vol:
+        vol = mkt.get("volume", 0)
+        if vol < min_vol or vol > max_vol:
+            continue
+
+        # --- Price trend filter ---
+        max_trend = cfg.get("max_price_trend", 0.05)
+        price_trend = mkt.get("price_trend")
+        if price_trend is not None and price_trend > max_trend:
             continue
 
         # --- Rate lookup: speaker first, then category, then overall ---
@@ -259,7 +272,19 @@ def compute_signals(
             "rate_source": rate_source,
             "volume": mkt.get("volume", 0),
             "close_time": mkt.get("close_time", ""),
+            "price_trend": mkt.get("price_trend"),
+            "total_bid_depth": mkt.get("total_bid_depth"),
+            "n_bid_levels": mkt.get("n_bid_levels"),
         })
+
+    # --- Intra-event correlation: boost edge when multiple markets in same event signal NO ---
+    event_counts: dict[str, int] = {}
+    for sig in signals:
+        evt = sig.get("event_ticker", "")
+        if evt:
+            event_counts[evt] = event_counts.get(evt, 0) + 1
+    for sig in signals:
+        sig["event_no_count"] = event_counts.get(sig.get("event_ticker", ""), 0)
 
     signals.sort(key=lambda s: s["expected_pnl"], reverse=True)
     return signals

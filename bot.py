@@ -89,13 +89,15 @@ def _trade_alert(sig: dict, n_contracts: int, cost: float, levels: list) -> None
     """Send Telegram alert for a trade."""
     best_yes = levels[0]["yes_implied"] if levels else sig["yes_mid"]
     no_price = 1.0 - best_yes
+    vol = sig.get("volume", 0)
+    vol_str = f"${vol/1000:.0f}K" if vol >= 1000 else f"${vol:.0f}"
     msg = (
         f"\U0001f7e2 TRADE: Sold YES @ {best_yes:.2f} (NO @ {no_price:.2f})\n"
         f"  Market: \"{sig.get('event_title', '')[:60]}\"\n"
         f"  Word: \"{sig.get('strike_word', '')}\"\n"
         f"  Edge: +{sig['edge']*100:.0f}c "
         f"(BR={sig['base_rate']*100:.0f}%, YES={sig['yes_mid']*100:.0f}%)\n"
-        f"  Contracts: {n_contracts}, Cost: ${cost:.2f}\n"
+        f"  Contracts: {n_contracts}, Cost: ${cost:.2f}, Vol: {vol_str}\n"
         f"  Rate source: {sig.get('rate_source', 'unknown')}"
     )
     _send_tg(msg)
@@ -247,15 +249,19 @@ def run_cycle(
 
     # Display signals
     logger.info("")
-    logger.info("%3s  %-35s  %5s  %5s  %6s  %7s  %12s  %8s",
-                 "#", "Word/Phrase", "YES", "BR", "Edge", "E[PnL]", "Speaker", "Src")
-    logger.info("-" * 110)
+    logger.info("%3s  %-35s  %5s  %5s  %6s  %7s  %7s  %12s  %8s",
+                 "#", "Word/Phrase", "YES", "BR", "Edge", "E[PnL]", "Vol",
+                 "Speaker", "Src")
+    logger.info("-" * 125)
     for i, sig in enumerate(signals):
-        logger.info("%3d  %-35s  %4.0f%%  %4.0f%%  %+5.0f%%  %+6.3f  %12s  %8s",
-                     i + 1, sig.get("strike_word", "")[:33],
-                     sig["yes_mid"] * 100, sig["base_rate"] * 100,
-                     sig["edge"] * 100, sig["expected_pnl"],
-                     sig.get("speaker", "")[:12], sig["rate_source"])
+        vol = sig.get("volume", 0)
+        vol_str = f"{vol/1000:.0f}K" if vol >= 1000 else f"{vol:.0f}"
+        logger.info(
+            "%3d  %-35s  %4.0f%%  %4.0f%%  %+5.0f%%  %+6.3f  %7s  %12s  %8s",
+            i + 1, sig.get("strike_word", "")[:33],
+            sig["yes_mid"] * 100, sig["base_rate"] * 100,
+            sig["edge"] * 100, sig["expected_pnl"], vol_str,
+            sig.get("speaker", "")[:12], sig["rate_source"])
 
     # 5. Execute trades
     max_positions = BOT_CONFIG.get("max_open_positions", 10)
