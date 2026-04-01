@@ -806,7 +806,13 @@ def main():
     if mode == "live":
         logger.info("Authenticating with Polymarket CLOB...")
         client = create_client()
-        logger.info("  Authenticated.")
+        # Preflight: verify CLOB connectivity with a harmless read
+        try:
+            _server_time = client.get_server_time()
+            logger.info("  Authenticated. CLOB server time: %s", _server_time)
+        except Exception as e:
+            logger.error("CLOB preflight failed — cannot reach server: %s", e)
+            sys.exit(1)
     elif mode == "paper":
         try:
             client = create_client()
