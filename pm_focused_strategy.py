@@ -67,8 +67,9 @@ PM_CONFIG = {
     "max_total_exposure_pct": 0.80,
     "max_per_event_pct": 0.20,
 
-    # Costs — Polymarket has no fees
-    "fee": 0.0,
+    # Costs — Polymarket taker fees (mentions: 25% rate, exponent 2)
+    "fee": 0.0,              # flat fee override (0 = use fee_category)
+    "fee_category": "mentions",  # Polymarket fee schedule category
     "slippage": 0.01,
 
     # Execution filters
@@ -130,6 +131,7 @@ def compute_signals(
     min_cat_n = cfg.get("min_category_n", 50)
     min_tx_events = cfg.get("min_transcript_events", 10)
     fee = cfg.get("fee", 0.0)
+    fee_category = cfg.get("fee_category")
     slip = cfg["slippage"]
     min_vol = cfg.get("min_volume", 0.0)
     max_vol = cfg.get("max_volume", float("inf"))
@@ -251,7 +253,8 @@ def compute_signals(
         # --- Expected PnL and Kelly sizing ---
         epnl, kelly_q = compute_expected_pnl(
             yes_mid, br, fee=fee, slippage=slip,
-            kelly_fraction=cfg["kelly_fraction"])
+            kelly_fraction=cfg["kelly_fraction"],
+            fee_category=fee_category)
 
         signals.append({
             "ticker": mkt.get("ticker", mkt.get("condition_id", "")),

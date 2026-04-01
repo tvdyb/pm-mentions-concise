@@ -78,6 +78,7 @@ def run_pm_vwap_backtest(
     min_tx_events = cfg.get("min_transcript_events", 10)
     slip = cfg["slippage"]
     fee = cfg.get("fee", 0.0)
+    fee_category = cfg.get("fee_category")
     min_vol = cfg.get("min_volume", 0.0)
     max_vol = cfg.get("max_volume", float("inf"))
     exclude_cats = set(cfg.get("exclude_categories", []))
@@ -209,7 +210,8 @@ def run_pm_vwap_backtest(
             trade_row["entry"][pk] = price
             trade_row["edge"][pk] = edge
             trade_row["pnl"][pk] = compute_settlement_pnl(
-                price, result, fee=fee, slippage=slip)
+                price, result, fee=fee, slippage=slip,
+                fee_category=fee_category)
 
         trades.append(trade_row)
 

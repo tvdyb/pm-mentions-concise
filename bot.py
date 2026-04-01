@@ -17,10 +17,12 @@ Environment variables:
 """
 
 import argparse
+import fcntl
 import hashlib
 import json
 import logging
 import os
+import signal
 import sys
 import time
 from collections import defaultdict
@@ -33,12 +35,18 @@ from shared import compute_expected_pnl, compute_settlement_pnl, size_position
 
 from polymarket_client import (
     BOT_CONFIG,
+    MM_CONFIG,
+    cancel_all_orders,
+    cancel_order,
     check_daily_loss,
+    compute_mm_quotes,
     create_client,
     enrich_with_order_book,
     execute_fok_no,
     fetch_mention_markets,
+    get_open_orders,
     load_positions,
+    place_limit_order,
     record_trade,
     save_positions,
     walk_order_book_ev,
@@ -179,6 +187,7 @@ def _check_settlements(state: dict, config: dict) -> None:
         pnl = compute_settlement_pnl(
             yes_entry, result, side="NO", n_contracts=n,
             fee=config.get("fee", 0.0), slippage=0.0,  # already accounted for
+            fee_category=config.get("fee_category"),
         )
 
         # Record realized PnL only (cost was tracked separately at open time)
@@ -358,7 +367,8 @@ def run_cycle(
             _, boosted_kelly = compute_expected_pnl(
                 sig["yes_mid"], effective_br,
                 fee=config.get("fee", 0.0), slippage=config["slippage"],
-                kelly_fraction=config["kelly_fraction"])
+                kelly_fraction=config["kelly_fraction"],
+                fee_category=config.get("fee_category"))
             sig["kelly_quarter"] = boosted_kelly
             # Re-size with updated Kelly
             n_contracts, cost = size_position(sig, remaining_capital, config)
@@ -458,6 +468,256 @@ def run_cycle(
 
 
 # ---------------------------------------------------------------------------
+# Market Making cycle
+# ---------------------------------------------------------------------------
+
+def _reconcile_mm_fills(
+    client,
+    state: dict,
+    config: dict,
+) -> int:
+    """Detect fills by comparing tracked orders vs open orders.
+
+    Removes filled orders from mm_orders state, records trades for fills.
+    Returns number of fills detected.
+    """
+    mm_orders = state.get("mm_orders", {})
+    if not mm_orders:
+        return 0
+
+    open_ids = set()
+    try:
+        live = get_open_orders(client)
+        open_ids = {o.get("id", o.get("orderID", "")) for o in live}
+    except Exception as e:
+        logger.warning("Failed to fetch open orders for reconciliation: %s", e)
+        return 0
+
+    fills = 0
+    for oid, info in list(mm_orders.items()):
+        if oid not in open_ids:
+            # Order gone = filled or cancelled. Assume filled if it was ours.
+            side_label = info.get("side", "?")
+            cid = info.get("condition_id", "")
+            price = info.get("price", 0)
+            size = info.get("size", 0)
+            logger.info("  MM fill detected: %s %d @ $%.4f (%s)",
+                        side_label, size, price, info.get("strike_word", "")[:30])
+
+            # Record as trade for PnL tracking
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if side_label == "BUY_NO":
+                no_cost = price
+                total_cost = no_cost * size
+                record_trade(state, cid, info.get("strike_word", ""),
+                             info.get("speaker", ""), size, no_cost,
+                             total_cost, {"orderID": oid, "mm_fill": True})
+            elif side_label == "BUY_YES":
+                # Bought YES = closing NO position or going long YES
+                # Record realized PnL if we had a NO position
+                if cid in state["positions"]:
+                    pos = state["positions"][cid]
+                    n_close = min(size, pos.get("n_contracts", 0))
+                    if n_close > 0:
+                        # PnL = (1 - yes_entry) - (yes_buy_price) per contract
+                        # We sold YES at yes_entry (= bought NO), now buying YES back at price
+                        yes_entry = pos.get("yes_price", 0.5)
+                        pnl_per = yes_entry - price  # profit if we sell high, buy low
+                        pnl = pnl_per * n_close
+                        state["daily_pnl"][today] = state["daily_pnl"].get(today, 0.0) + pnl
+                        pos["n_contracts"] -= n_close
+                        if pos["n_contracts"] <= 0:
+                            del state["positions"][cid]
+                        logger.info("    Closed %d NO contracts, PnL: $%.2f", n_close, pnl)
+
+            del mm_orders[oid]
+            fills += 1
+
+    state["mm_orders"] = mm_orders
+    return fills
+
+
+def run_mm_cycle(
+    client,
+    calibration: dict,
+    config: dict,
+    state: dict,
+    capital: float,
+    max_daily_loss: float,
+    mode: str = "live",
+) -> int:
+    """Run one market-making cycle: cancel stale, compute quotes, place GTC orders.
+
+    Returns number of orders placed.
+    """
+    mm_cfg = {**MM_CONFIG, **{k: v for k, v in config.items() if k.startswith("mm_")}}
+
+    # 1. Check daily loss
+    ok, today_pnl = check_daily_loss(state, max_daily_loss)
+    if not ok:
+        logger.warning("Daily loss limit breached ($%.2f). Cancelling all orders.",
+                        abs(today_pnl))
+        if mode == "live":
+            cancel_all_orders(client)
+        state["mm_orders"] = {}
+        return 0
+
+    # 2. Reconcile fills from last cycle
+    fills = _reconcile_mm_fills(client, state, config)
+    if fills > 0:
+        logger.info("Reconciled %d MM fills", fills)
+        save_positions(state)
+
+    # 3. Cancel all stale orders
+    if mode == "live" and state.get("mm_orders"):
+        logger.info("Cancelling %d stale MM orders...", len(state["mm_orders"]))
+        cancel_all_orders(client)
+    state["mm_orders"] = {}
+
+    # 4. Fetch markets and signals
+    logger.info("MM: Scanning markets...")
+    raw_markets = fetch_mention_markets()
+    if not raw_markets:
+        return 0
+
+    if client is not None:
+        markets = enrich_with_order_book(client, raw_markets)
+    else:
+        markets = raw_markets
+
+    signals = pm_compute_signals(markets, calibration, config=config)
+    logger.info("  %d signals pass strategy filter", len(signals))
+
+    if not signals:
+        return 0
+
+    # 5. Select top N markets by expected PnL
+    max_markets = mm_cfg.get("mm_max_markets", 15)
+    top_signals = signals[:max_markets]
+
+    # 6. Compute quotes and place orders
+    half_spread = mm_cfg["mm_half_spread"]
+    skew_per = mm_cfg["mm_inventory_skew"]
+    quote_size = mm_cfg["mm_quote_size"]
+    max_inventory = mm_cfg["mm_max_inventory"]
+
+    n_orders = 0
+    open_cost = sum(p.get("total_cost", 0.0) for p in state["positions"].values())
+    remaining_capital = capital - open_cost
+
+    for sig in top_signals:
+        cid = sig["ticker"]
+        fair_yes = sig["base_rate"]
+        speaker = sig.get("speaker", "")
+
+        # Find enriched market
+        mkt = next((m for m in markets if m.get("ticker") == cid or m.get("condition_id") == cid), None)
+        if not mkt:
+            continue
+
+        yes_token_id = mkt.get("yes_token_id", "")
+        no_token_id = mkt.get("no_token_id", "")
+        if not yes_token_id or not no_token_id:
+            continue
+
+        tick_size = mkt.get("tick_size", "0.01")
+
+        # Current inventory: net YES-equivalent position
+        # If we hold NO contracts, inventory is negative (short YES)
+        pos = state["positions"].get(cid, {})
+        no_contracts = pos.get("n_contracts", 0)
+        inventory = -no_contracts  # long NO = short YES
+
+        quotes = compute_mm_quotes(fair_yes, half_spread, inventory, skew_per, tick_size)
+
+        # Capital check: each side costs quote_size * price
+        no_side_cost = quotes["no_bid_price"] * quote_size
+        yes_side_cost = quotes["yes_bid"] * quote_size
+        if no_side_cost + yes_side_cost > remaining_capital:
+            logger.debug("  Skip %s — insufficient capital for MM quotes", sig["strike_word"][:30])
+            continue
+
+        logger.info("  MM %s: fair=%.0f%% bid=%.2f ask=%.2f inv=%d skew=%.3f",
+                     sig["strike_word"][:25], fair_yes * 100,
+                     quotes["yes_bid"], quotes["yes_ask"],
+                     inventory, quotes["skew"])
+
+        # Place YES bid (buy YES below fair value)
+        if abs(inventory) < max_inventory or inventory < 0:
+            if mode == "live":
+                resp = place_limit_order(
+                    client, mkt, yes_token_id, "BUY",
+                    quotes["yes_bid"], quote_size)
+                if resp:
+                    oid = (resp or {}).get("orderID", "")
+                    if oid:
+                        state.setdefault("mm_orders", {})[oid] = {
+                            "condition_id": cid,
+                            "strike_word": sig.get("strike_word", ""),
+                            "speaker": speaker,
+                            "side": "BUY_YES",
+                            "price": quotes["yes_bid"],
+                            "size": quote_size,
+                        }
+                    n_orders += 1
+            elif mode == "paper":
+                n_orders += 1
+
+        # Place NO bid (= sell YES above fair value, placed as BUY NO)
+        if abs(inventory) < max_inventory or inventory > 0:
+            if mode == "live":
+                resp = place_limit_order(
+                    client, mkt, no_token_id, "BUY",
+                    quotes["no_bid_price"], quote_size)
+                if resp:
+                    oid = (resp or {}).get("orderID", "")
+                    if oid:
+                        state.setdefault("mm_orders", {})[oid] = {
+                            "condition_id": cid,
+                            "strike_word": sig.get("strike_word", ""),
+                            "speaker": speaker,
+                            "side": "BUY_NO",
+                            "price": quotes["no_bid_price"],
+                            "size": quote_size,
+                        }
+                    n_orders += 1
+            elif mode == "paper":
+                n_orders += 1
+
+        remaining_capital -= (no_side_cost + yes_side_cost)
+        time.sleep(0.3)
+
+    # 7. Save state
+    state["last_mm_scan"] = datetime.now(timezone.utc).isoformat()
+    save_positions(state)
+
+    logger.info("MM cycle: %d orders placed across %d markets, %d open positions.",
+                 n_orders, min(len(top_signals), max_markets), len(state["positions"]))
+    return n_orders
+
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown
+# ---------------------------------------------------------------------------
+
+_shutdown_requested = False
+_mm_client = None
+
+
+def _handle_shutdown(signum, frame):
+    """Signal handler for graceful MM shutdown."""
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.info("\nShutdown signal received (sig=%d). Cancelling orders...", signum)
+    if _mm_client is not None:
+        try:
+            cancel_all_orders(_mm_client)
+            logger.info("All orders cancelled.")
+        except Exception as e:
+            logger.error("Failed to cancel orders on shutdown: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -477,6 +737,8 @@ def main():
                         help=f"Daily loss limit (default: ${BOT_CONFIG['max_daily_loss']:.0f})")
     parser.add_argument("--once", action="store_true",
                         help="Run one cycle and exit")
+    parser.add_argument("--mm", action="store_true",
+                        help="Market-making mode (two-sided GTC quotes)")
     args = parser.parse_args()
 
     # Determine mode
@@ -486,6 +748,17 @@ def main():
         mode = "paper"
     else:
         mode = "live"
+
+    mm_mode = args.mm
+
+    # Single-process lock — prevent concurrent bot instances
+    lock_path = Path(BOT_CONFIG["state_file"]).with_suffix(".lock")
+    _lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.error("Another bot instance is already running (lock: %s)", lock_path)
+        sys.exit(1)
 
     # Fail early if live mode without private key
     if mode == "live" and not os.environ.get("POLYMARKET_PRIVATE_KEY"):
@@ -501,15 +774,32 @@ def main():
     config["max_position_pct"] = 0.10
     config["min_order_size"] = 1
 
-    # Load calibration
+    # Load calibration with freshness check
     cal_path = Path("data/pm_calibration.json")
     if not cal_path.exists():
         logger.error("No calibration data. Run: python pm_base_rates.py")
         sys.exit(1)
+
+    cal_age_days = (time.time() - cal_path.stat().st_mtime) / 86400
+    MAX_CAL_AGE = 14  # days
+    if cal_age_days > MAX_CAL_AGE:
+        if mode == "live":
+            logger.error(
+                "Calibration data is %.0f days old (max %d). "
+                "Refusing to trade on stale data. Run: python pm_base_rates.py",
+                cal_age_days, MAX_CAL_AGE)
+            sys.exit(1)
+        else:
+            logger.warning(
+                "Calibration data is %.0f days old (max %d). "
+                "Run: python pm_base_rates.py to refresh.",
+                cal_age_days, MAX_CAL_AGE)
+
     calibration = load_calibration(str(cal_path))
-    logger.info("Loaded calibration: %d speakers, %d resolved markets",
+    logger.info("Loaded calibration: %d speakers, %d resolved markets (%.0f days old)",
                  calibration["metadata"]["n_speakers"],
-                 calibration["overall"]["n_markets"])
+                 calibration["overall"]["n_markets"],
+                 cal_age_days)
 
     # Create CLOB client (skip for dry-run)
     client = None
@@ -542,7 +832,8 @@ def main():
 
     # Banner
     logger.info("")
-    logger.info("=== PM Mentions Bot ===")
+    bot_type = "MM" if mm_mode else "Directional"
+    logger.info("=== PM Mentions Bot (%s) ===", bot_type)
     logger.info("  Mode:           %s", mode.upper())
     logger.info("  Capital:        $%.0f", args.capital)
     logger.info("  Max daily loss: $%.0f", args.max_daily_loss)
@@ -555,6 +846,12 @@ def main():
                  int(config["edge_min_speaker_high_n"] * 100),
                  int(config["edge_min_speaker_low_n"] * 100),
                  int(config["edge_min_category"] * 100))
+    if mm_mode:
+        mm_cfg = {**MM_CONFIG, **{k: v for k, v in config.items() if k.startswith("mm_")}}
+        logger.info("  MM spread:      %.0fc half", mm_cfg["mm_half_spread"] * 100)
+        logger.info("  MM quote size:  %d contracts/side", mm_cfg["mm_quote_size"])
+        logger.info("  MM max inv:     %d contracts", mm_cfg["mm_max_inventory"])
+        logger.info("  MM max markets: %d", mm_cfg["mm_max_markets"])
     excluded = config.get("exclude_speakers", [])
     if excluded:
         logger.info("  Excluded:       %s", ", ".join(excluded))
@@ -563,29 +860,51 @@ def main():
     logger.info("  Config hash:    %s", config_hash)
     logger.info("")
 
+    # Register signal handlers for graceful shutdown in MM mode
+    if mm_mode:
+        global _mm_client
+        _mm_client = client
+        signal.signal(signal.SIGINT, _handle_shutdown)
+        signal.signal(signal.SIGTERM, _handle_shutdown)
+
     # Main loop
-    while True:
+    while not _shutdown_requested:
         try:
-            run_cycle(
-                client, calibration, config, state,
-                capital=args.capital,
-                max_daily_loss=args.max_daily_loss,
-                mode=mode,
-            )
+            if mm_mode:
+                run_mm_cycle(
+                    client, calibration, config, state,
+                    capital=args.capital,
+                    max_daily_loss=args.max_daily_loss,
+                    mode=mode,
+                )
+            else:
+                run_cycle(
+                    client, calibration, config, state,
+                    capital=args.capital,
+                    max_daily_loss=args.max_daily_loss,
+                    mode=mode,
+                )
         except KeyboardInterrupt:
             logger.info("\nStopped by user.")
+            if mm_mode and client and mode == "live":
+                logger.info("Cancelling all MM orders...")
+                cancel_all_orders(client)
             break
         except Exception:
             logger.exception("Error in scan cycle")
 
-        if args.once:
+        if args.once or _shutdown_requested:
             break
 
-        logger.info("\nNext scan in %ds...", args.interval)
+        interval = mm_cfg["mm_refresh_interval"] if mm_mode else args.interval
+        logger.info("\nNext scan in %ds...", interval)
         try:
-            time.sleep(args.interval)
+            time.sleep(interval)
         except KeyboardInterrupt:
             logger.info("\nStopped by user.")
+            if mm_mode and client and mode == "live":
+                logger.info("Cancelling all MM orders...")
+                cancel_all_orders(client)
             break
 
 

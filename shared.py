@@ -95,6 +95,42 @@ def equiv_series(series: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Polymarket fee calculation
+# ---------------------------------------------------------------------------
+
+PM_FEE_SCHEDULE = {
+    "mentions":    {"rate": 0.25, "exponent": 2},
+    "sports":      {"rate": 0.03, "exponent": 1},
+    "crypto":      {"rate": 0.072, "exponent": 1},
+    "politics":    {"rate": 0.04, "exponent": 1},
+    "finance":     {"rate": 0.04, "exponent": 1},
+    "economics":   {"rate": 0.03, "exponent": 0.5},
+    "culture":     {"rate": 0.05, "exponent": 1},
+    "weather":     {"rate": 0.025, "exponent": 0.5},
+    "tech":        {"rate": 0.04, "exponent": 1},
+    "geopolitics": {"rate": 0.0, "exponent": 1},
+    "other":       {"rate": 0.20, "exponent": 2},
+}
+
+
+def pm_taker_fee(price: float, category: str = "mentions") -> float:
+    """Compute Polymarket taker fee per contract.
+
+    Formula: fee = p × feeRate × (p × (1-p))^exponent
+    where p = price of the token being bought.
+
+    Returns fee in dollars per contract (≥ 0.0001 minimum, or 0 if below).
+    """
+    sched = PM_FEE_SCHEDULE.get(category, PM_FEE_SCHEDULE["other"])
+    rate = sched["rate"]
+    exp = sched["exponent"]
+    if rate == 0 or price <= 0 or price >= 1:
+        return 0.0
+    raw = price * rate * (price * (1.0 - price)) ** exp
+    return round(max(raw, 0.0001), 4) if raw > 0 else 0.0
+
+
+# ---------------------------------------------------------------------------
 # Expected PnL and Kelly sizing
 # ---------------------------------------------------------------------------
 def compute_expected_pnl(
@@ -103,14 +139,22 @@ def compute_expected_pnl(
     fee: float = 0.0,
     slippage: float = 0.01,
     kelly_fraction: float = 0.25,
+    fee_category: str | None = None,
 ) -> tuple[float, float]:
     """Compute expected PnL per NO contract and quarter-Kelly fraction.
+
+    If fee_category is set (e.g. "mentions"), computes the Polymarket
+    taker fee from the NO price instead of using the flat fee param.
 
     Returns (expected_pnl, kelly_quarter).
     """
     eff_yes = max(0.01, yes_mid - slippage)
     no_cost = 1.0 - eff_yes
     p_no = 1.0 - base_rate
+
+    if fee_category:
+        fee = pm_taker_fee(no_cost, category=fee_category)
+
     epnl = p_no * eff_yes - base_rate * no_cost - fee
 
     if epnl > 0:
@@ -166,6 +210,7 @@ def compute_settlement_pnl(
     config: dict | None = None,
     fee: float = 0.0,
     slippage: float = 0.01,
+    fee_category: str | None = None,
 ) -> float:
     """Compute realized PnL when a market settles."""
     if config is not None:
@@ -173,6 +218,8 @@ def compute_settlement_pnl(
         slippage = config["slippage"]
     eff_yes = max(0.01, entry_price - slippage)
     no_cost = 1.0 - eff_yes
+    if fee_category:
+        fee = pm_taker_fee(no_cost, category=fee_category)
 
     if side == "NO":
         pnl_per = (eff_yes - fee) if result == "no" else (-no_cost - fee)

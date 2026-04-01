@@ -22,12 +22,18 @@ logger = logging.getLogger("bot.polymarket_client")
 
 __all__ = [
     "BOT_CONFIG",
+    "MM_CONFIG",
+    "cancel_all_orders",
+    "cancel_order",
     "check_daily_loss",
+    "compute_mm_quotes",
     "create_client",
     "enrich_with_order_book",
     "execute_fok_no",
     "fetch_mention_markets",
+    "get_open_orders",
     "load_positions",
+    "place_limit_order",
     "record_trade",
     "save_positions",
     "walk_order_book_ev",
@@ -52,6 +58,23 @@ BOT_CONFIG = {
     "telegram_chat_id": os.environ.get("TG_CHAT_ID", ""),
     "private_key": os.environ.get("POLYMARKET_PRIVATE_KEY", ""),
     "state_file": "bot_state.json",
+    # Wallet auth — signature_type depends on wallet kind:
+    #   0 = standard EOA
+    #   1 = email / Magic proxy wallet
+    #   2 = browser-wallet proxy / Gnosis Safe
+    "signature_type": int(os.environ.get("POLYMARKET_SIG_TYPE", "1")),
+    "funder": os.environ.get("POLYMARKET_FUNDER", ""),
+    "clob_host": os.environ.get("POLYMARKET_CLOB_HOST", CLOB_HOST),
+    "chain_id": int(os.environ.get("POLYMARKET_CHAIN_ID", str(CHAIN_ID))),
+}
+
+MM_CONFIG = {
+    "mm_half_spread": 0.03,          # half-spread around fair value
+    "mm_inventory_skew": 0.005,      # price skew per net contract
+    "mm_quote_size": 10,             # contracts per side per market
+    "mm_max_inventory": 50,          # max net contracts before pausing one side
+    "mm_max_markets": 15,            # max simultaneous markets to quote
+    "mm_refresh_interval": 120,      # seconds between cancel-and-replace cycles
 }
 
 
@@ -90,6 +113,10 @@ def _gamma_get(
 def create_client(private_key: str | None = None, max_retries: int = 3):
     """Create and authenticate a Polymarket CLOB client.
 
+    Reads signature_type, funder, clob_host, and chain_id from BOT_CONFIG
+    (which sources them from env vars). Validates the auth handshake before
+    returning.
+
     Lazily imports py_clob_client so tests that don't need the CLOB
     can still import this module without the dependency installed.
     """
@@ -100,16 +127,35 @@ def create_client(private_key: str | None = None, max_retries: int = 3):
         raise ValueError(
             "No private key. Set POLYMARKET_PRIVATE_KEY env var.")
 
-    funder = os.environ.get("POLYMARKET_FUNDER", BOT_CONFIG.get("funder", ""))
+    sig_type = BOT_CONFIG.get("signature_type", 1)
+    funder = BOT_CONFIG.get("funder", "")
+    host = BOT_CONFIG.get("clob_host", CLOB_HOST)
+    chain = BOT_CONFIG.get("chain_id", CHAIN_ID)
+
+    if sig_type not in (0, 1, 2):
+        raise ValueError(
+            f"Invalid POLYMARKET_SIG_TYPE={sig_type}. Must be 0 (EOA), "
+            f"1 (Magic/email proxy), or 2 (browser/Gnosis proxy).")
+
+    # sig_type 1 and 2 require a funder address
+    if sig_type in (1, 2) and not funder:
+        logger.warning(
+            "signature_type=%d typically requires POLYMARKET_FUNDER. "
+            "Auth may fail if your wallet uses a proxy.", sig_type)
+
+    logger.info("CLOB client: host=%s chain=%d sig_type=%d funder=%s",
+                host, chain, sig_type, funder[:10] + "…" if funder else "(none)")
+
     client = ClobClient(
-        CLOB_HOST, key=key, chain_id=CHAIN_ID,
-        signature_type=1, funder=funder,
+        host, key=key, chain_id=chain,
+        signature_type=sig_type, funder=funder if funder else None,
     )
 
     for attempt in range(max_retries):
         try:
             creds = client.create_or_derive_api_creds()
             client.set_api_creds(creds)
+            logger.info("CLOB auth OK (api_key=%s…)", creds.api_key[:8] if hasattr(creds, 'api_key') else "?")
             return client
         except Exception as e:
             if attempt < max_retries - 1:
@@ -296,6 +342,7 @@ def walk_order_book_ev(
         return []
 
     fee = config.get("fee", 0.0)
+    fee_category = config.get("fee_category")
     slippage = config.get("slippage", 0.01)
 
     levels: list[dict] = []
@@ -312,7 +359,8 @@ def walk_order_book_ev(
         no_price = 1.0 - yes_price
 
         epnl, _ = compute_expected_pnl(
-            yes_price, base_rate, fee=fee, slippage=slippage)
+            yes_price, base_rate, fee=fee, slippage=slippage,
+            fee_category=fee_category)
 
         if epnl <= 0:
             break  # all subsequent levels are worse
@@ -378,10 +426,15 @@ def execute_fok_no(
         result = client.post_order(signed_order, orderType=OrderType.FOK)
         logger.info("  Order response: %s", result)
 
-        # Validate FOK result
-        status = (result or {}).get("status", "")
-        if status and status.upper() not in ("MATCHED", "FILLED", "LIVE", ""):
-            logger.warning("  FOK unexpected status: %s — treating as failed", status)
+        # FOK must fill immediately and fully, or be cancelled.
+        # Only MATCHED or FILLED confirms actual execution.
+        if not result:
+            logger.warning("  FOK returned empty response — treating as failed")
+            return None
+
+        status = (result or {}).get("status", "").upper()
+        if status not in ("MATCHED", "FILLED"):
+            logger.warning("  FOK status=%s — not confirmed filled, treating as failed", status)
             return None
 
         return result
@@ -506,3 +559,166 @@ def save_positions(state: dict, path: str | None = None) -> None:
         tmp_path.replace(state_path)
     except OSError as e:
         logger.error("Failed to save state: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Market Making: compute_mm_quotes
+# ---------------------------------------------------------------------------
+
+def compute_mm_quotes(
+    fair_yes: float,
+    half_spread: float,
+    inventory: int,
+    skew_per: float,
+    tick_size: str = "0.01",
+) -> dict:
+    """Compute two-sided MM quotes around a fair value.
+
+    Args:
+        fair_yes: Fair YES probability (from base rate / calibration).
+        half_spread: Half the bid-ask spread to quote (e.g., 0.03).
+        inventory: Net YES-equivalent inventory (positive = long YES, negative = short YES / long NO).
+        skew_per: Price skew per contract of inventory (e.g., 0.005).
+        tick_size: Minimum tick (e.g., "0.01").
+
+    Returns dict with:
+        yes_bid: price to bid on YES side
+        yes_ask: price to ask on YES side (placed as BUY NO at 1 - yes_ask)
+        no_bid_price: 1 - yes_ask (what we pay to BUY NO)
+        skew: total inventory skew applied
+    """
+    tick = float(tick_size)
+    skew = inventory * skew_per
+
+    # Inventory skew: when long NO (inventory < 0), skew > 0 is wrong.
+    # Convention: positive inventory = long YES. Skew lowers both quotes
+    # when long YES (makes us more eager to sell YES / buy NO).
+    yes_bid_raw = fair_yes - half_spread - skew
+    yes_ask_raw = fair_yes + half_spread - skew
+
+    # Round to tick and clamp to [tick, 1 - tick]
+    def _snap(price: float) -> float:
+        snapped = round(round(price / tick) * tick, 4)
+        return max(tick, min(1.0 - tick, snapped))
+
+    yes_bid = _snap(yes_bid_raw)
+    yes_ask = _snap(yes_ask_raw)
+
+    # Ensure bid < ask after snapping
+    if yes_bid >= yes_ask:
+        mid = (yes_bid + yes_ask) / 2
+        yes_bid = _snap(mid - tick)
+        yes_ask = _snap(mid + tick)
+
+    return {
+        "yes_bid": yes_bid,
+        "yes_ask": yes_ask,
+        "no_bid_price": round(1.0 - yes_ask, 4),
+        "skew": round(skew, 6),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Market Making: place_limit_order
+# ---------------------------------------------------------------------------
+
+def place_limit_order(
+    client,
+    market: dict,
+    token_id: str,
+    side: str,
+    price: float,
+    size: int,
+) -> dict | None:
+    """Place a GTC limit order on the CLOB.
+
+    Args:
+        client: Authenticated ClobClient.
+        market: Market dict with tick_size and neg_risk.
+        token_id: YES or NO token ID.
+        side: "BUY" or "SELL".
+        price: Limit price.
+        size: Number of contracts.
+
+    Returns order response dict on success, None on failure.
+    """
+    from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
+
+    tick_size = market.get("tick_size", "0.01")
+    neg_risk = market.get("neg_risk", False)
+
+    # Round to tick
+    tick = float(tick_size)
+    price = round(round(price / tick) * tick, 4)
+
+    logger.info("GTC %s %d @ $%.4f — token %s…%s",
+                side, size, price, token_id[:8], token_id[-4:])
+
+    try:
+        signed_order = client.create_order(
+            OrderArgs(
+                token_id=token_id,
+                price=price,
+                size=size,
+                side=side,
+            ),
+            PartialCreateOrderOptions(
+                tick_size=tick_size,
+                neg_risk=neg_risk,
+            ),
+        )
+        result = client.post_order(signed_order, orderType=OrderType.GTC)
+        logger.info("  Order response: %s", result)
+        return result
+    except Exception as e:
+        logger.error("GTC order failed: %s", e)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Market Making: cancel_order / cancel_all_orders / get_open_orders
+# ---------------------------------------------------------------------------
+
+def cancel_order(client, order_id: str) -> bool:
+    """Cancel a single order by ID. Returns True on success."""
+    try:
+        client.cancel(order_id)
+        return True
+    except Exception as e:
+        logger.warning("Cancel order %s failed: %s", order_id[:12], e)
+        return False
+
+
+def cancel_all_orders(client) -> int:
+    """Cancel all open orders. Returns number cancelled."""
+    try:
+        resp = client.cancel_all()
+        logger.info("cancel_all response: %s", resp)
+        # py_clob_client returns list of cancelled order IDs or a status dict
+        if isinstance(resp, list):
+            return len(resp)
+        return 1 if resp else 0
+    except Exception as e:
+        logger.error("cancel_all failed: %s", e)
+        return 0
+
+
+def get_open_orders(client, market_condition_id: str | None = None) -> list[dict]:
+    """Get open orders, optionally filtered by market.
+
+    Returns list of order dicts with at least: id, price, size, side, token_id.
+    """
+    try:
+        if market_condition_id:
+            orders = client.get_orders(
+                params={"market": market_condition_id, "state": "LIVE"})
+        else:
+            orders = client.get_orders(params={"state": "LIVE"})
+
+        # Normalize: py_clob_client may return list or dict with "orders" key
+        if isinstance(orders, dict):
+            orders = orders.get("orders", [])
+        return orders or []
+    except Exception as e:
+        logger.error("get_open_orders failed: %s", e)
+        return []

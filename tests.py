@@ -1093,5 +1093,278 @@ class TestVwapBacktestSpeakerExclusion:
         assert len(passed) == 0
 
 
+# ---------------------------------------------------------------------------
+# Market Making: compute_mm_quotes
+# ---------------------------------------------------------------------------
+
+from shared import pm_taker_fee
+from polymarket_client import compute_mm_quotes
+
+
+# ---------------------------------------------------------------------------
+# pm_taker_fee
+# ---------------------------------------------------------------------------
+
+class TestPmTakerFee:
+    def test_mentions_fee_at_half(self):
+        """At p=0.50 mentions fee should be non-trivial."""
+        fee = pm_taker_fee(0.50, "mentions")
+        # 0.50 * 0.25 * (0.50*0.50)^2 = 0.50 * 0.25 * 0.0625 = 0.0078
+        assert fee == pytest.approx(0.0078, abs=0.001)
+
+    def test_mentions_fee_at_extreme(self):
+        """At p=0.10, fee should be very small due to exponent 2."""
+        fee = pm_taker_fee(0.10, "mentions")
+        # 0.10 * 0.25 * (0.10*0.90)^2 = 0.10 * 0.25 * 0.0081 = 0.000203
+        assert fee < 0.001
+        assert fee > 0
+
+    def test_geopolitics_free(self):
+        """Geopolitics should be fee-free."""
+        assert pm_taker_fee(0.50, "geopolitics") == 0.0
+
+    def test_sports_fee(self):
+        """Sports: 3% rate, exponent 1."""
+        fee = pm_taker_fee(0.50, "sports")
+        # 0.50 * 0.03 * (0.50*0.50)^1 = 0.50 * 0.03 * 0.25 = 0.00375
+        assert fee == pytest.approx(0.0038, abs=0.001)
+
+    def test_fee_at_zero_price(self):
+        assert pm_taker_fee(0.0, "mentions") == 0.0
+
+    def test_fee_at_one_price(self):
+        assert pm_taker_fee(1.0, "mentions") == 0.0
+
+    def test_unknown_category_uses_other(self):
+        """Unknown category falls back to 'other' schedule."""
+        fee = pm_taker_fee(0.50, "nonexistent")
+        fee_other = pm_taker_fee(0.50, "other")
+        assert fee == fee_other
+
+
+class TestComputeMmQuotes:
+    def test_basic_symmetric(self):
+        """No inventory => symmetric quotes around fair value."""
+        q = compute_mm_quotes(0.40, 0.03, inventory=0, skew_per=0.005)
+        assert q["yes_bid"] == pytest.approx(0.37, abs=0.011)
+        assert q["yes_ask"] == pytest.approx(0.43, abs=0.011)
+        assert q["no_bid_price"] == pytest.approx(1.0 - q["yes_ask"], abs=0.001)
+        assert q["skew"] == 0.0
+
+    def test_inventory_skew_long_no(self):
+        """Long NO (short YES) -> inventory negative -> skew raises quotes."""
+        q_neutral = compute_mm_quotes(0.40, 0.03, inventory=0, skew_per=0.005)
+        q_long_no = compute_mm_quotes(0.40, 0.03, inventory=-10, skew_per=0.005)
+        # Skew = -10 * 0.005 = -0.05, applied as -skew => +0.05
+        # Both quotes shift up (more aggressive YES buying)
+        assert q_long_no["yes_bid"] > q_neutral["yes_bid"]
+        assert q_long_no["yes_ask"] > q_neutral["yes_ask"]
+
+    def test_inventory_skew_long_yes(self):
+        """Long YES -> skew lowers quotes (more eager to sell YES)."""
+        q_neutral = compute_mm_quotes(0.40, 0.03, inventory=0, skew_per=0.005)
+        q_long_yes = compute_mm_quotes(0.40, 0.03, inventory=10, skew_per=0.005)
+        assert q_long_yes["yes_bid"] < q_neutral["yes_bid"]
+        assert q_long_yes["yes_ask"] < q_neutral["yes_ask"]
+
+    def test_bid_always_below_ask(self):
+        """Even with extreme skew, bid must stay below ask."""
+        q = compute_mm_quotes(0.50, 0.01, inventory=50, skew_per=0.01)
+        assert q["yes_bid"] < q["yes_ask"]
+
+    def test_clamped_to_valid_range(self):
+        """Quotes should be in (0, 1) after tick snapping."""
+        q = compute_mm_quotes(0.02, 0.03, inventory=0, skew_per=0.0)
+        assert q["yes_bid"] >= 0.01
+        assert q["yes_ask"] <= 0.99
+        q2 = compute_mm_quotes(0.98, 0.03, inventory=0, skew_per=0.0)
+        assert q2["yes_bid"] >= 0.01
+        assert q2["yes_ask"] <= 0.99
+
+    def test_tick_size_rounding(self):
+        """Quotes snap to tick_size grid."""
+        q = compute_mm_quotes(0.333, 0.03, inventory=0, skew_per=0.0, tick_size="0.01")
+        # 0.333 - 0.03 = 0.303 -> rounds to 0.30
+        # 0.333 + 0.03 = 0.363 -> rounds to 0.36
+        assert q["yes_bid"] == pytest.approx(0.30, abs=0.011)
+        assert q["yes_ask"] == pytest.approx(0.36, abs=0.011)
+
+
+# ---------------------------------------------------------------------------
+# Market Making: run_mm_cycle (unit-level)
+# ---------------------------------------------------------------------------
+
+class TestMmReconcileFills:
+    def test_fill_detection_removes_from_state(self):
+        """Filled order (not in open_ids) gets removed from mm_orders."""
+        from bot import _reconcile_mm_fills
+
+        state = {
+            "positions": {},
+            "trades": [],
+            "daily_pnl": {},
+            "daily_cost": {},
+            "mm_orders": {
+                "order_abc": {
+                    "condition_id": "cid1",
+                    "strike_word": "test",
+                    "speaker": "trump",
+                    "side": "BUY_NO",
+                    "price": 0.60,
+                    "size": 10,
+                },
+            },
+        }
+
+        # Mock client that returns no open orders (= all filled)
+        class MockClient:
+            def get_orders(self, params=None):
+                return []
+
+        fills = _reconcile_mm_fills(MockClient(), state, {})
+        assert fills == 1
+        assert "order_abc" not in state["mm_orders"]
+        # BUY_NO fill should create a position
+        assert "cid1" in state["positions"]
+
+    def test_unfilled_order_stays(self):
+        """Order still open stays in mm_orders."""
+        from bot import _reconcile_mm_fills
+
+        state = {
+            "positions": {},
+            "trades": [],
+            "daily_pnl": {},
+            "daily_cost": {},
+            "mm_orders": {
+                "order_xyz": {
+                    "condition_id": "cid2",
+                    "strike_word": "test2",
+                    "speaker": "biden",
+                    "side": "BUY_YES",
+                    "price": 0.35,
+                    "size": 5,
+                },
+            },
+        }
+
+        class MockClient:
+            def get_orders(self, params=None):
+                return [{"id": "order_xyz"}]
+
+        fills = _reconcile_mm_fills(MockClient(), state, {})
+        assert fills == 0
+        assert "order_xyz" in state["mm_orders"]
+
+
+class TestMmGracefulShutdown:
+    def test_shutdown_handler_sets_flag(self):
+        """Signal handler sets _shutdown_requested flag."""
+        import bot
+        bot._shutdown_requested = False
+        bot._mm_client = None  # no client to cancel on
+        bot._handle_shutdown(2, None)
+        assert bot._shutdown_requested is True
+        # Reset
+        bot._shutdown_requested = False
+
+
+# ---------------------------------------------------------------------------
+# Deployment: wallet auth validation
+# ---------------------------------------------------------------------------
+
+class TestCreateClientValidation:
+    def test_invalid_sig_type_raises(self):
+        """Invalid signature_type should raise ValueError."""
+        from polymarket_client import BOT_CONFIG
+        original = BOT_CONFIG["signature_type"]
+        BOT_CONFIG["signature_type"] = 5
+        try:
+            from polymarket_client import create_client
+            with pytest.raises(ValueError, match="Invalid POLYMARKET_SIG_TYPE"):
+                create_client(private_key="0x" + "a" * 64)
+        finally:
+            BOT_CONFIG["signature_type"] = original
+
+
+# ---------------------------------------------------------------------------
+# Deployment: FOK strict fill validation
+# ---------------------------------------------------------------------------
+
+class TestFokStrictValidation:
+    def test_fok_rejects_live_status(self):
+        """FOK should reject LIVE status — it means not fully filled."""
+        from polymarket_client import execute_fok_no
+
+        class MockClient:
+            def create_order(self, *a, **kw):
+                return "signed"
+            def post_order(self, *a, **kw):
+                return {"status": "LIVE", "orderID": "abc"}
+
+        mkt = {
+            "no_token_id": "token123",
+            "tick_size": "0.01",
+            "neg_risk": False,
+            "strike_word": "test",
+        }
+        result = execute_fok_no(MockClient(), mkt, 10, 0.60, {"fee": 0})
+        assert result is None
+
+    def test_fok_accepts_matched(self):
+        """FOK should accept MATCHED status."""
+        from polymarket_client import execute_fok_no
+
+        class MockClient:
+            def create_order(self, *a, **kw):
+                return "signed"
+            def post_order(self, *a, **kw):
+                return {"status": "MATCHED", "orderID": "abc"}
+
+        mkt = {
+            "no_token_id": "token123",
+            "tick_size": "0.01",
+            "neg_risk": False,
+            "strike_word": "test",
+        }
+        result = execute_fok_no(MockClient(), mkt, 10, 0.60, {"fee": 0})
+        assert result is not None
+        assert result["status"] == "MATCHED"
+
+    def test_fok_rejects_empty_response(self):
+        """FOK should reject None/empty response."""
+        from polymarket_client import execute_fok_no
+
+        class MockClient:
+            def create_order(self, *a, **kw):
+                return "signed"
+            def post_order(self, *a, **kw):
+                return None
+
+        mkt = {
+            "no_token_id": "token123",
+            "tick_size": "0.01",
+            "neg_risk": False,
+            "strike_word": "test",
+        }
+        result = execute_fok_no(MockClient(), mkt, 10, 0.60, {"fee": 0})
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Deployment: calibration freshness
+# ---------------------------------------------------------------------------
+
+class TestCalibrationFreshness:
+    def test_pm_taker_fee_integrated_with_epnl(self):
+        """compute_expected_pnl with fee_category should reduce PnL vs no fee."""
+        from shared import compute_expected_pnl
+        epnl_no_fee, _ = compute_expected_pnl(0.40, 0.20, fee=0.0, slippage=0.01)
+        epnl_with_fee, _ = compute_expected_pnl(0.40, 0.20, slippage=0.01,
+                                                  fee_category="mentions")
+        assert epnl_with_fee < epnl_no_fee
+        assert epnl_with_fee > 0  # should still be positive at this edge
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
