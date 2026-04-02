@@ -75,7 +75,8 @@ PM_CONFIG = {
     # Execution filters
     "max_no_spread": 0.05,          # skip markets with NO spread > 5c
 
-    # Volume filter
+    # Volume filter — NOTE: live volume is in-progress (lower than final),
+    # so this filter is less strict live than in backtest (which uses final volume).
     "min_volume": 0.0,              # minimum volume to consider
     "max_volume": 10_000,           # skip hyper-liquid markets (arb-dominated)
 
@@ -93,6 +94,11 @@ PM_CONFIG = {
 
     # Transcript data staleness — skip transcript rates if data is older than this
     "max_transcript_age_days": 180,
+
+    # Intra-event decay factors (applied in bot.py when sibling markets resolve NO)
+    # WARNING: these are live-only adjustments, not validated in backtest
+    "event_decay_2_nos": 0.75,     # base rate multiplier when 2 sibling NOs
+    "event_decay_3plus_nos": 0.65, # base rate multiplier when 3+ sibling NOs
 }
 
 

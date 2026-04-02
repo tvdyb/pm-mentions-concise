@@ -1196,7 +1196,7 @@ class TestComputeMmQuotes:
 
 class TestMmReconcileFills:
     def test_fill_detection_removes_from_state(self):
-        """Filled order (not in open_ids) gets removed from mm_orders."""
+        """Confirmed filled order (MATCHED status) gets removed from mm_orders."""
         from bot import _reconcile_mm_fills
 
         state = {
@@ -1216,16 +1216,83 @@ class TestMmReconcileFills:
             },
         }
 
-        # Mock client that returns no open orders (= all filled)
+        # Mock client: order not in open list, but get_order confirms MATCHED
         class MockClient:
             def get_orders(self, params=None):
                 return []
+            def get_order(self, order_id):
+                return {"id": order_id, "status": "MATCHED"}
 
         fills = _reconcile_mm_fills(MockClient(), state, {})
         assert fills == 1
         assert "order_abc" not in state["mm_orders"]
         # BUY_NO fill should create a position
         assert "cid1" in state["positions"]
+
+    def test_cancelled_order_removed_no_phantom(self):
+        """Cancelled order gets removed from tracking but does NOT create a position."""
+        from bot import _reconcile_mm_fills
+
+        state = {
+            "positions": {},
+            "trades": [],
+            "daily_pnl": {},
+            "daily_cost": {},
+            "mm_orders": {
+                "order_cancel": {
+                    "condition_id": "cid_cancel",
+                    "strike_word": "phantom",
+                    "speaker": "trump",
+                    "side": "BUY_NO",
+                    "price": 0.60,
+                    "size": 10,
+                },
+            },
+        }
+
+        class MockClient:
+            def get_orders(self, params=None):
+                return []
+            def get_order(self, order_id):
+                return {"id": order_id, "status": "CANCELLED"}
+
+        fills = _reconcile_mm_fills(MockClient(), state, {})
+        assert fills == 0
+        assert "order_cancel" not in state["mm_orders"]
+        # No phantom position created
+        assert "cid_cancel" not in state["positions"]
+
+    def test_unknown_status_skipped(self):
+        """Order with unknown status is skipped (not removed, not counted as fill)."""
+        from bot import _reconcile_mm_fills
+
+        state = {
+            "positions": {},
+            "trades": [],
+            "daily_pnl": {},
+            "daily_cost": {},
+            "mm_orders": {
+                "order_unk": {
+                    "condition_id": "cid_unk",
+                    "strike_word": "mystery",
+                    "speaker": "biden",
+                    "side": "BUY_NO",
+                    "price": 0.50,
+                    "size": 5,
+                },
+            },
+        }
+
+        class MockClient:
+            def get_orders(self, params=None):
+                return []
+            def get_order(self, order_id):
+                return {"id": order_id, "status": "PENDING"}
+
+        fills = _reconcile_mm_fills(MockClient(), state, {})
+        assert fills == 0
+        # Order stays in tracking since status is ambiguous
+        assert "order_unk" in state["mm_orders"]
 
     def test_unfilled_order_stays(self):
         """Order still open stays in mm_orders."""
@@ -1251,6 +1318,8 @@ class TestMmReconcileFills:
         class MockClient:
             def get_orders(self, params=None):
                 return [{"id": "order_xyz"}]
+            def get_order(self, order_id):
+                return {"id": order_id, "status": "LIVE"}
 
         fills = _reconcile_mm_fills(MockClient(), state, {})
         assert fills == 0

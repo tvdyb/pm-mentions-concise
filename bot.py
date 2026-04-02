@@ -357,9 +357,12 @@ def run_cycle(
         n_resolved = event_nos.get(event_key, 0)
         effective_br = sig["base_rate"]
         if n_resolved >= 2:
-            # Data shows: 2 prior NOs -> YES rate drops ~25% relative
-            # 3+ prior NOs -> YES rate drops ~35% relative
-            decay = 0.75 if n_resolved < 3 else 0.65
+            # Intra-event decay: reduces base rate when sibling markets resolved NO.
+            # WARNING: These factors are live-only — not validated in the backtest.
+            # They increase position sizes beyond what the backtest tested.
+            decay_2 = config.get("event_decay_2_nos", 0.75)  # 2 prior NOs
+            decay_3 = config.get("event_decay_3plus_nos", 0.65)  # 3+ prior NOs
+            decay = decay_2 if n_resolved < 3 else decay_3
             effective_br = sig["base_rate"] * decay
             logger.info("    Event boost: %d sibling NOs -> adj BR %.1f%% (was %.1f%%)",
                         n_resolved, effective_br * 100, sig["base_rate"] * 100)
@@ -496,7 +499,25 @@ def _reconcile_mm_fills(
     fills = 0
     for oid, info in list(mm_orders.items()):
         if oid not in open_ids:
-            # Order gone = filled or cancelled. Assume filled if it was ours.
+            # Order no longer open — could be filled, cancelled, or expired.
+            # Query the order to confirm it was actually filled.
+            try:
+                order_detail = client.get_order(oid)
+                order_status = (order_detail or {}).get("status", "").upper()
+            except Exception:
+                order_status = ""
+
+            if order_status in ("CANCELLED", "EXPIRED"):
+                logger.info("  MM order %s was %s (not filled), removing from tracking",
+                            oid[:12], order_status)
+                del mm_orders[oid]
+                continue
+            elif order_status not in ("MATCHED", "FILLED"):
+                # Unknown status — log and skip, don't assume filled
+                logger.warning("  MM order %s has status=%s, cannot confirm fill — skipping",
+                               oid[:12], order_status or "UNKNOWN")
+                continue
+
             side_label = info.get("side", "?")
             cid = info.get("condition_id", "")
             price = info.get("price", 0)

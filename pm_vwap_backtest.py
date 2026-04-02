@@ -79,6 +79,11 @@ def run_pm_vwap_backtest(
     slip = cfg["slippage"]
     fee = cfg.get("fee", 0.0)
     fee_category = cfg.get("fee_category")
+    # NOTE: Volume semantics differ between live and backtest.
+    # Backtest uses final (lifetime) volume from resolved markets.
+    # Live bot uses current (in-progress) volume, which is lower.
+    # A live market at $3K current volume may reach $15K final volume,
+    # so the max_volume filter is stricter in backtest than live.
     min_vol = cfg.get("min_volume", 0.0)
     max_vol = cfg.get("max_volume", float("inf"))
     exclude_cats = set(cfg.get("exclude_categories", []))
