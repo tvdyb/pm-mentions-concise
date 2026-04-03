@@ -96,9 +96,11 @@ PM_CONFIG = {
     "max_transcript_age_days": 180,
 
     # Intra-event decay factors (applied in bot.py when sibling markets resolve NO)
-    # WARNING: these are live-only adjustments, not validated in backtest
-    "event_decay_2_nos": 0.75,     # base rate multiplier when 2 sibling NOs
-    "event_decay_3plus_nos": 0.65, # base rate multiplier when 3+ sibling NOs
+    # WARNING: these are live-only adjustments, not validated in backtest.
+    # Disabled by default (1.0 = no decay). Enable only after validating
+    # against historical intra-event resolution data.
+    "event_decay_2_nos": 1.0,      # base rate multiplier when 2 sibling NOs
+    "event_decay_3plus_nos": 1.0,  # base rate multiplier when 3+ sibling NOs
 }
 
 

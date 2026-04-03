@@ -492,7 +492,8 @@ def record_trade(
             "opened_at": now,
         }
 
-    # Append trade record
+    # Append trade record (capped at 5000 to prevent unbounded state growth)
+    MAX_TRADE_HISTORY = 5000
     state["trades"].append({
         "timestamp": now,
         "condition_id": condition_id,
@@ -505,6 +506,8 @@ def record_trade(
         "yes_price": yes_price,
         "order_id": (order_response or {}).get("orderID", ""),
     })
+    if len(state["trades"]) > MAX_TRADE_HISTORY:
+        state["trades"] = state["trades"][-MAX_TRADE_HISTORY:]
 
     # Track daily cost separately from realized PnL
     daily_cost = state.get("daily_cost", {})

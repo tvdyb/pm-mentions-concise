@@ -165,12 +165,15 @@ def _check_settlements(state: dict, config: dict) -> None:
         yes_p = float(prices[0])
         no_p = float(prices[1])
         result = None
-        if yes_p >= 0.99:
-            result = "yes"
-        elif no_p >= 0.99:
-            result = "no"
-        elif data.get("resolved") is True:
+        # Use the resolved flag as the primary settlement signal.
+        # outcomePrices alone can reflect live market prices (e.g. YES=99c)
+        # which would false-trigger settlement on unsettled markets.
+        if data.get("resolved") is True:
             result = "yes" if yes_p > no_p else "no"
+        elif data.get("closed") is True and yes_p >= 0.99:
+            result = "yes"
+        elif data.get("closed") is True and no_p >= 0.99:
+            result = "no"
 
         if result is None:
             continue
@@ -508,37 +511,50 @@ def _reconcile_mm_fills(
                 order_status = ""
 
             if order_status in ("CANCELLED", "EXPIRED"):
-                logger.info("  MM order %s was %s (not filled), removing from tracking",
-                            oid[:12], order_status)
-                del mm_orders[oid]
-                continue
+                # Check for partial fill before discarding
+                size_matched = float((order_detail or {}).get("size_matched", 0))
+                if size_matched > 0:
+                    logger.info("  MM order %s was %s with partial fill: %d of %d contracts",
+                                oid[:12], order_status, int(size_matched),
+                                info.get("size", 0))
+                    # Record only the filled portion
+                    filled_size = int(size_matched)
+                else:
+                    logger.info("  MM order %s was %s (not filled), removing from tracking",
+                                oid[:12], order_status)
+                    del mm_orders[oid]
+                    continue
             elif order_status not in ("MATCHED", "FILLED"):
                 # Unknown status — log and skip, don't assume filled
                 logger.warning("  MM order %s has status=%s, cannot confirm fill — skipping",
                                oid[:12], order_status or "UNKNOWN")
                 continue
+            else:
+                # Confirmed fill — use size_matched from API if available,
+                # fall back to original size only for fully matched orders.
+                size_matched = float((order_detail or {}).get("size_matched", 0))
+                filled_size = int(size_matched) if size_matched > 0 else info.get("size", 0)
 
             side_label = info.get("side", "?")
             cid = info.get("condition_id", "")
             price = info.get("price", 0)
-            size = info.get("size", 0)
             logger.info("  MM fill detected: %s %d @ $%.4f (%s)",
-                        side_label, size, price, info.get("strike_word", "")[:30])
+                        side_label, filled_size, price, info.get("strike_word", "")[:30])
 
             # Record as trade for PnL tracking
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             if side_label == "BUY_NO":
                 no_cost = price
-                total_cost = no_cost * size
+                total_cost = no_cost * filled_size
                 record_trade(state, cid, info.get("strike_word", ""),
-                             info.get("speaker", ""), size, no_cost,
+                             info.get("speaker", ""), filled_size, no_cost,
                              total_cost, {"orderID": oid, "mm_fill": True})
             elif side_label == "BUY_YES":
                 # Bought YES = closing NO position or going long YES
                 # Record realized PnL if we had a NO position
                 if cid in state["positions"]:
                     pos = state["positions"][cid]
-                    n_close = min(size, pos.get("n_contracts", 0))
+                    n_close = min(filled_size, pos.get("n_contracts", 0))
                     if n_close > 0:
                         # PnL = (1 - yes_entry) - (yes_buy_price) per contract
                         # We sold YES at yes_entry (= bought NO), now buying YES back at price

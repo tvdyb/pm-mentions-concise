@@ -93,9 +93,11 @@ python bot.py --mm
 
 ## Fees
 
-Polymarket taker fees use the formula: `fee = p * feeRate * (p * (1-p))^exponent`
+Polymarket is **not** zero-fee. Taker fees use the formula: `fee = p * feeRate * (p * (1-p))^exponent`
 
-For mentions: rate=25%, exponent=2. Fees peak at p=0.50 (~$0.008/contract) and drop fast at extremes. At p=0.10 (typical NO entry): ~$0.0002/contract.
+For mentions: rate=25%, exponent=2. At a typical NO entry of 70c (YES=30c), fee is ~$0.008/contract — roughly 8-9% of expected PnL per trade. Fees peak at p=0.50 (~$0.016/contract) and drop at extremes. The backtest correctly includes these fees via `fee_category="mentions"`.
+
+Note: the strategy config has `"fee": 0.0` which is a flat fee override that is bypassed when `fee_category` is set — the PM fee schedule is always applied in practice.
 
 ## Running Tests
 

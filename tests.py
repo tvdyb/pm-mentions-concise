@@ -664,6 +664,17 @@ class TestPositionTracking:
         assert abs(state["daily_cost"][today] - 10.0) < 1e-6
         assert state["daily_pnl"].get(today, 0.0) == 0.0
 
+    def test_trades_list_capped(self):
+        """Trades list should not grow beyond MAX_TRADE_HISTORY."""
+        state = {"positions": {}, "trades": [], "daily_pnl": {}, "daily_cost": {}}
+        # Fill with 5000 trades
+        for i in range(5001):
+            record_trade(state, f"cid_{i}", f"Word{i}", "speaker",
+                         1, 0.50, 0.50, None)
+        assert len(state["trades"]) == 5000
+        # Most recent trade should be the last one added
+        assert state["trades"][-1]["condition_id"] == "cid_5000"
+
 
 # ---------------------------------------------------------------------------
 # Speaker exclusion tests
@@ -814,20 +825,30 @@ class TestCountResolvedNos:
 class TestEventBoostLogic:
     """Test the base rate decay applied when sibling markets resolved NO."""
 
-    def test_two_resolved_nos_decay(self):
-        """2 resolved NOs -> 0.75x decay on base rate."""
-        # Simulating what bot.py does
+    def test_decay_disabled_by_default(self):
+        """Default config has decay=1.0 (disabled), so no boost applied."""
+        from pm_focused_strategy import PM_CONFIG
+        assert PM_CONFIG["event_decay_2_nos"] == 1.0
+        assert PM_CONFIG["event_decay_3plus_nos"] == 1.0
+
+    def test_two_resolved_nos_decay_when_enabled(self):
+        """2 resolved NOs -> 0.75x decay on base rate when configured."""
         base_rate = 0.44
         n_resolved = 2
-        decay = 0.75 if n_resolved < 3 else 0.65
+        # Simulating bot.py with explicit config
+        decay_2 = 0.75
+        decay_3 = 0.65
+        decay = decay_2 if n_resolved < 3 else decay_3
         effective_br = base_rate * decay
         assert abs(effective_br - 0.33) < 0.01
 
-    def test_three_resolved_nos_decay(self):
-        """3+ resolved NOs -> 0.65x decay on base rate."""
+    def test_three_resolved_nos_decay_when_enabled(self):
+        """3+ resolved NOs -> 0.65x decay on base rate when configured."""
         base_rate = 0.44
         n_resolved = 5
-        decay = 0.75 if n_resolved < 3 else 0.65
+        decay_2 = 0.75
+        decay_3 = 0.65
+        decay = decay_2 if n_resolved < 3 else decay_3
         effective_br = base_rate * decay
         assert abs(effective_br - 0.286) < 0.01
 
@@ -1221,16 +1242,51 @@ class TestMmReconcileFills:
             def get_orders(self, params=None):
                 return []
             def get_order(self, order_id):
-                return {"id": order_id, "status": "MATCHED"}
+                return {"id": order_id, "status": "MATCHED", "size_matched": "10"}
 
         fills = _reconcile_mm_fills(MockClient(), state, {})
         assert fills == 1
         assert "order_abc" not in state["mm_orders"]
         # BUY_NO fill should create a position
         assert "cid1" in state["positions"]
+        assert state["positions"]["cid1"]["n_contracts"] == 10
+
+    def test_partial_fill_records_correct_size(self):
+        """Partially filled then cancelled order records only the filled portion."""
+        from bot import _reconcile_mm_fills
+
+        state = {
+            "positions": {},
+            "trades": [],
+            "daily_pnl": {},
+            "daily_cost": {},
+            "mm_orders": {
+                "order_partial": {
+                    "condition_id": "cid_partial",
+                    "strike_word": "partial",
+                    "speaker": "trump",
+                    "side": "BUY_NO",
+                    "price": 0.60,
+                    "size": 10,
+                },
+            },
+        }
+
+        class MockClient:
+            def get_orders(self, params=None):
+                return []
+            def get_order(self, order_id):
+                return {"id": order_id, "status": "CANCELLED", "size_matched": "3"}
+
+        fills = _reconcile_mm_fills(MockClient(), state, {})
+        assert fills == 1
+        assert "order_partial" not in state["mm_orders"]
+        # Position should reflect only the 3 filled contracts, not 10
+        assert "cid_partial" in state["positions"]
+        assert state["positions"]["cid_partial"]["n_contracts"] == 3
 
     def test_cancelled_order_removed_no_phantom(self):
-        """Cancelled order gets removed from tracking but does NOT create a position."""
+        """Cancelled order with no fills gets removed without creating a position."""
         from bot import _reconcile_mm_fills
 
         state = {
@@ -1254,7 +1310,7 @@ class TestMmReconcileFills:
             def get_orders(self, params=None):
                 return []
             def get_order(self, order_id):
-                return {"id": order_id, "status": "CANCELLED"}
+                return {"id": order_id, "status": "CANCELLED", "size_matched": "0"}
 
         fills = _reconcile_mm_fills(MockClient(), state, {})
         assert fills == 0
