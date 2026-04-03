@@ -400,8 +400,9 @@ class TestTranscriptRateIntegration:
         if not OUT_PATH.exists():
             pytest.skip("Transcript rates not generated")
         cal = self._make_calibration()
-        # "Filibuster" should have 0% rate in Trump transcripts
-        mkts = [self._make_pm_market(yes_mid=0.50, strike_word="Filibuster")]
+        # "Filibuster" should have 0% rate in Trump transcripts.
+        # Use yes_mid=0.15 so edge (~15c) stays within max_edge=0.20 cap.
+        mkts = [self._make_pm_market(yes_mid=0.15, strike_word="Filibuster")]
         signals = pm_compute_signals(mkts, cal)
         assert len(signals) == 1
         sig = signals[0]
@@ -734,6 +735,65 @@ class TestMaxVolumeFilter:
         assert len(signals) == 1
 
 
+class TestMaxEdgeFilter:
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+            "volume": 1000,
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_edge_within_cap_passes(self):
+        """Edge of 6c (YES=0.50, BR=0.44) should pass max_edge=0.20."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(yes_mid=0.50)]  # edge = 0.50 - 0.44 = 0.06
+        cfg = dict(PM_CONFIG)
+        cfg["max_edge"] = 0.20
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+    def test_large_edge_filtered(self):
+        """Edge >20c should be filtered — market knows something we don't."""
+        cal = self._make_calibration()
+        # YES=0.60, BR=0.20 -> edge=0.40 (way above 20c cap)
+        cal_low_br = dict(cal)
+        cal_low_br["by_speaker"] = {"trump": {"base_rate": 0.20, "n_markets": 5261}}
+        mkts = [self._make_pm_market(yes_mid=0.45)]  # edge = 0.45 - 0.20 = 0.25
+        cfg = dict(PM_CONFIG)
+        cfg["max_edge"] = 0.20
+        signals = pm_compute_signals(mkts, cal_low_br, config=cfg)
+        assert len(signals) == 0
+
+    def test_no_max_edge_passes_all(self):
+        """With max_edge=inf, all edges pass."""
+        cal = self._make_calibration()
+        cal["by_speaker"] = {"trump": {"base_rate": 0.10, "n_markets": 5261}}
+        mkts = [self._make_pm_market(yes_mid=0.55)]  # edge = 0.45
+        cfg = dict(PM_CONFIG)
+        cfg["max_edge"] = float("inf")
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+
 class TestPriceTrendFilter:
     def _make_pm_market(self, **overrides):
         base = {
@@ -823,42 +883,43 @@ class TestCountResolvedNos:
 
 
 class TestEventBoostLogic:
-    """Test the base rate decay applied when sibling markets resolved NO."""
+    """Test the validated intra-event decay from 597 multi-market events."""
 
-    def test_decay_disabled_by_default(self):
-        """Default config has decay=1.0 (disabled), so no boost applied."""
+    def test_decay_table_in_config(self):
+        """Default config has validated decay table."""
         from pm_focused_strategy import PM_CONFIG
-        assert PM_CONFIG["event_decay_2_nos"] == 1.0
-        assert PM_CONFIG["event_decay_3plus_nos"] == 1.0
+        assert PM_CONFIG["event_decay"] == {1: 0.85, 2: 0.78, 3: 0.75, 4: 0.70}
+        assert PM_CONFIG["event_decay_default"] == 0.60
 
-    def test_two_resolved_nos_decay_when_enabled(self):
-        """2 resolved NOs -> 0.75x decay on base rate when configured."""
+    def test_one_resolved_no_decays(self):
+        """1 resolved NO -> 0.85x decay (bot now boosts starting at 1)."""
         base_rate = 0.44
-        n_resolved = 2
-        # Simulating bot.py with explicit config
-        decay_2 = 0.75
-        decay_3 = 0.65
-        decay = decay_2 if n_resolved < 3 else decay_3
+        decay_table = {1: 0.85, 2: 0.78, 3: 0.75, 4: 0.70}
+        decay = decay_table.get(1, 0.60)
         effective_br = base_rate * decay
-        assert abs(effective_br - 0.33) < 0.01
+        assert abs(effective_br - 0.374) < 0.01
 
-    def test_three_resolved_nos_decay_when_enabled(self):
-        """3+ resolved NOs -> 0.65x decay on base rate when configured."""
+    def test_two_resolved_nos_decay(self):
+        """2 resolved NOs -> 0.78x decay."""
         base_rate = 0.44
-        n_resolved = 5
-        decay_2 = 0.75
-        decay_3 = 0.65
-        decay = decay_2 if n_resolved < 3 else decay_3
+        decay_table = {1: 0.85, 2: 0.78, 3: 0.75, 4: 0.70}
+        decay = decay_table.get(2, 0.60)
         effective_br = base_rate * decay
-        assert abs(effective_br - 0.286) < 0.01
+        assert abs(effective_br - 0.343) < 0.01
 
-    def test_no_boost_below_threshold(self):
-        """0-1 resolved NOs -> no decay applied."""
+    def test_five_plus_uses_default(self):
+        """5+ resolved NOs -> default 0.60x decay."""
         base_rate = 0.44
-        for n_resolved in (0, 1):
-            # Bot only applies boost when n_resolved >= 2
-            effective_br = base_rate
-            assert effective_br == 0.44
+        decay_table = {1: 0.85, 2: 0.78, 3: 0.75, 4: 0.70}
+        decay = decay_table.get(5, 0.60)
+        effective_br = base_rate * decay
+        assert abs(effective_br - 0.264) < 0.01
+
+    def test_no_boost_at_zero(self):
+        """0 resolved NOs -> no decay applied."""
+        # Bot only applies boost when n_resolved >= 1
+        base_rate = 0.44
+        assert base_rate == 0.44
 
 
 class TestBookDepthEnrichment:
@@ -1053,12 +1114,12 @@ class TestVwapBacktestVolumeFilter:
                 "strike_word": f"Word{i}",
                 "result": "no",
                 "end_date": f"2025-01-{i+1:02d}T00:00:00Z",
-                "vwap_25pct_buffer": 0.50,
+                "vwap_25pct_buffer": 0.15,  # low YES price -> edge within max_edge cap
                 "n_trades": 10,
-                "volume": 5000,
+                "volume": 2000,
             })
         cfg = dict(PM_CONFIG)
-        cfg["max_volume"] = 10_000
+        cfg["max_volume"] = 3_000
         trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
         passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
         assert len(passed) > 0

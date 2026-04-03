@@ -69,6 +69,7 @@ def run_pm_vwap_backtest(
     edge_min_sp_low = cfg.get("edge_min_speaker_low_n", 0.06)
     edge_min_cat = cfg.get("edge_min_category", 0.10)
     edge_min_tx = cfg.get("edge_min_transcript", 0.04)
+    max_edge = cfg.get("max_edge", float("inf"))
     sp_high_n = cfg.get("speaker_high_n_threshold", 100)
     br_max = cfg["br_max"]
     max_yes = cfg["max_yes_price"]
@@ -207,7 +208,7 @@ def run_pm_vwap_backtest(
                 edge_min = edge_min_sp_high if n_hist >= sp_high_n else edge_min_sp_low
             else:
                 edge_min = edge_min_cat
-            if edge < edge_min:
+            if edge < edge_min or edge > max_edge:
                 trade_row["passed"][pk] = False
                 continue
 

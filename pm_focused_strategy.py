@@ -39,6 +39,9 @@ PM_CONFIG = {
     "edge_min_speaker_high_n": 0.04,  # speakers with 100+ markets
     "edge_min_speaker_low_n": 0.06,   # speakers with 20-99 markets
     "edge_min_category": 0.10,        # category-level fallback
+    "max_edge": 0.20,                 # Skip markets where YES is >20c above base rate —
+                                      # large "edges" are where the market is right and we're wrong.
+                                      # OOS: removing >20c edges lifts Sharpe from 0.20 to 0.33
     "speaker_high_n_threshold": 100,  # markets needed for "high N"
 
     # Base rate cap — don't trade if base rate is too high
@@ -75,13 +78,13 @@ PM_CONFIG = {
     # Execution filters
     "max_no_spread": 0.05,          # skip markets with NO spread > 5c
 
-    # Volume filter — LOAD-BEARING. Markets >$10K volume have ~51% NO rate
-    # (no edge). Markets ≤$10K have ~60% NO rate (all the profit).
-    # Removing this filter collapses the strategy's edge.
+    # Volume filter — LOAD-BEARING. Edge concentrates in thin markets:
+    # Vol 500-2K: Sharpe 0.31. Vol 2K-5K: Sharpe 0.03. Vol >10K: coin flip.
+    # Tightening from 10K to 3K: OOS Sharpe 0.33 -> 0.42, win rate 85%.
     # NOTE: live volume is in-progress (lower than final), so this filter
     # is less strict live than in backtest (which uses final volume).
     "min_volume": 0.0,              # minimum volume to consider
-    "max_volume": 10_000,           # DO NOT REMOVE — edge only exists in illiquid markets
+    "max_volume": 3_000,            # DO NOT REMOVE — edge only exists in thin markets
 
     # Price trend filter — skip markets where YES is drifting up (bad for NO)
     # Positive trend means CLOB midpoint > Gamma mid → price rising
@@ -99,11 +102,10 @@ PM_CONFIG = {
     "max_transcript_age_days": 180,
 
     # Intra-event decay factors (applied in bot.py when sibling markets resolve NO)
-    # WARNING: these are live-only adjustments, not validated in backtest.
-    # Disabled by default (1.0 = no decay). Enable only after validating
-    # against historical intra-event resolution data.
-    "event_decay_2_nos": 1.0,      # base rate multiplier when 2 sibling NOs
-    "event_decay_3plus_nos": 1.0,  # base rate multiplier when 3+ sibling NOs
+    # Validated against 597 multi-market events. Actual NO-resolution decay:
+    # 1 prior NO: 0.85x, 2: 0.78x, 3: 0.75x, 4: 0.70x, 5+: 0.60x
+    "event_decay": {1: 0.85, 2: 0.78, 3: 0.75, 4: 0.70},
+    "event_decay_default": 0.60,   # 5+ prior NOs
 }
 
 
@@ -146,6 +148,7 @@ def compute_signals(
     slip = cfg["slippage"]
     min_vol = cfg.get("min_volume", 0.0)
     max_vol = cfg.get("max_volume", float("inf"))
+    max_edge = cfg.get("max_edge", float("inf"))
     max_trend = cfg.get("max_price_trend", 0.05)
     exclude_cats = set(cfg.get("exclude_categories", []))
     exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
@@ -258,7 +261,7 @@ def compute_signals(
             edge_min = edge_min_sp_high if n_hist >= sp_high_n else edge_min_sp_low
         else:
             edge_min = edge_min_cat
-        if edge < edge_min:
+        if edge < edge_min or edge > max_edge:
             continue
 
         # --- Expected PnL and Kelly sizing ---

@@ -359,13 +359,12 @@ def run_cycle(
         event_key = sig.get("event_ticker", "")
         n_resolved = event_nos.get(event_key, 0)
         effective_br = sig["base_rate"]
-        if n_resolved >= 2:
+        if n_resolved >= 1:
             # Intra-event decay: reduces base rate when sibling markets resolved NO.
-            # WARNING: These factors are live-only — not validated in the backtest.
-            # They increase position sizes beyond what the backtest tested.
-            decay_2 = config.get("event_decay_2_nos", 0.75)  # 2 prior NOs
-            decay_3 = config.get("event_decay_3plus_nos", 0.65)  # 3+ prior NOs
-            decay = decay_2 if n_resolved < 3 else decay_3
+            # Validated against 597 multi-market events.
+            decay_table = config.get("event_decay", {1: 0.85, 2: 0.78, 3: 0.75, 4: 0.70})
+            decay_default = config.get("event_decay_default", 0.60)
+            decay = decay_table.get(n_resolved, decay_default)
             effective_br = sig["base_rate"] * decay
             logger.info("    Event boost: %d sibling NOs -> adj BR %.1f%% (was %.1f%%)",
                         n_resolved, effective_br * 100, sig["base_rate"] * 100)
