@@ -86,7 +86,9 @@ def run_pm_vwap_backtest(
     # A live market at $3K current volume may reach $15K final volume,
     # so the max_volume filter is stricter in backtest than live.
     min_vol = cfg.get("min_volume", 0.0)
-    max_vol = cfg.get("max_volume", float("inf"))
+    max_vol_core = cfg.get("max_volume", 3000)
+    max_vol_ext = cfg.get("max_volume_extended", 5000)
+    min_trades_ext = cfg.get("min_trades_extended_tier", 75)
     exclude_cats = set(cfg.get("exclude_categories", []))
     exclude_speakers = set(s.lower() for s in cfg.get("exclude_speakers", []))
 
@@ -110,9 +112,15 @@ def run_pm_vwap_backtest(
         strike_word = m.get("strike_word", "")
         outcome = 1 if result == "yes" else 0
 
-        # --- Volume filter ---
+        # --- Volume filter (two-tier) ---
         vol = m.get("volume", 0)
-        vol_excluded = vol < min_vol or vol > max_vol
+        n_trades_mkt = m.get("n_trades", 0)
+        if vol > max_vol_ext:
+            vol_excluded = True
+        elif vol > max_vol_core:
+            vol_excluded = n_trades_mkt < min_trades_ext
+        else:
+            vol_excluded = vol < min_vol
 
         # --- Category / speaker exclusion ---
         cat_excluded = category in exclude_cats
@@ -123,23 +131,30 @@ def run_pm_vwap_backtest(
         n_hist = 0
         rate_source = None
 
-        # Priority 1: Transcript word-level rate (static, not rolling)
+        # Priority 1: Rolling speaker rate (highest reliability)
+        prior = rolling_speaker.get(speaker, [])
+        if len(prior) >= min_sp_n:
+            br = np.mean(prior)
+            n_hist = len(prior)
+            rate_source = "speaker"
+
+        # Priority 2: Transcript word-level rate — used when no speaker rate,
+        # OR when it diverges significantly (>10pp) from speaker rate
         if transcript_rates and speaker and strike_word:
             tx_rate = find_transcript_rate(
                 speaker, strike_word, transcript_rates,
                 min_events=min_tx_events)
             if tx_rate is not None:
-                br = tx_rate["base_rate"]
-                n_hist = tx_rate["n_events"]
-                rate_source = "transcript"
-
-        # Priority 2: Rolling speaker rate
-        if br is None:
-            prior = rolling_speaker.get(speaker, [])
-            if len(prior) >= min_sp_n:
-                br = np.mean(prior)
-                n_hist = len(prior)
-                rate_source = "speaker"
+                if br is None:
+                    br = tx_rate["base_rate"]
+                    n_hist = tx_rate["n_events"]
+                    rate_source = "transcript"
+                else:
+                    divergence = abs(tx_rate["base_rate"] - br)
+                    if divergence > 0.10 and tx_rate["n_events"] >= 30:
+                        br = tx_rate["base_rate"]
+                        n_hist = tx_rate["n_events"]
+                        rate_source = "transcript_override"
 
         # Priority 3: Rolling category rate
         if br is None:
@@ -202,7 +217,7 @@ def run_pm_vwap_backtest(
                 continue
 
             edge = price - br
-            if rate_source == "transcript":
+            if rate_source in ("transcript", "transcript_override"):
                 edge_min = edge_min_tx
             elif rate_source == "speaker":
                 edge_min = edge_min_sp_high if n_hist >= sp_high_n else edge_min_sp_low
@@ -349,7 +364,15 @@ def generate_report(trades, markets, param_results, cfg):
                  f"{end_dates[0][:10]} to {end_dates[-1][:10]}.*")
     lines.append("")
     max_vol_cfg = cfg.get("max_volume", float("inf"))
-    vol_note = f" Volume cap: ${max_vol_cfg:,.0f}." if max_vol_cfg != float("inf") else ""
+    max_vol_ext_cfg = cfg.get("max_volume_extended", max_vol_cfg)
+    if max_vol_cfg != float("inf"):
+        if max_vol_ext_cfg > max_vol_cfg:
+            vol_note = (f" Volume: core <${max_vol_cfg:,.0f}, "
+                        f"extended <${max_vol_ext_cfg:,.0f} (with trade-count gate).")
+        else:
+            vol_note = f" Volume cap: ${max_vol_cfg:,.0f}."
+    else:
+        vol_note = ""
     lines.append("All results use **real VWAP 25% buffer** entry prices from "
                  "CLOB trade history and **rolling speaker base rates** "
                  "(no look-ahead). PM taker fees included (mentions: 25% rate, "

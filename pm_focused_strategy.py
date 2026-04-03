@@ -64,8 +64,14 @@ PM_CONFIG = {
     "min_speaker_n": 20,            # need 20+ resolved markets per speaker
     "min_category_n": 50,           # category rates need more data
 
-    # Position sizing
-    "kelly_fraction": 0.25,
+    # Position sizing — confidence-scaled Kelly fractions
+    "kelly_fraction": 0.25,         # default (used when no tiers configured)
+    "kelly_confidence_tiers": {
+        500: 0.35,   # High confidence (500+ resolved markets for this speaker)
+        200: 0.30,   # Good confidence
+        100: 0.25,   # Standard (current default)
+        0:   0.18,   # Low confidence (20-99 markets, wider edge threshold compensates)
+    },
     "max_position_pct": 0.02,
     "max_total_exposure_pct": 0.80,
     "max_per_event_pct": 0.20,
@@ -80,11 +86,14 @@ PM_CONFIG = {
 
     # Volume filter — LOAD-BEARING. Edge concentrates in thin markets:
     # Vol 500-2K: Sharpe 0.31. Vol 2K-5K: Sharpe 0.03. Vol >10K: coin flip.
-    # Tightening from 10K to 3K: OOS Sharpe 0.33 -> 0.42, win rate 85%.
     # NOTE: live volume is in-progress (lower than final), so this filter
     # is less strict live than in backtest (which uses final volume).
     "min_volume": 0.0,              # minimum volume to consider
-    "max_volume": 3_000,            # DO NOT REMOVE — edge only exists in thin markets
+    "max_volume": 3_000,            # Core tier: DO NOT REMOVE — edge only exists in thin markets
+    "max_volume_extended": 5_000,   # Extended tier: markets 3K-5K pass IF they have
+                                    # enough trade count (mature, reliable pricing)
+    "min_trades_extended_tier": 75, # Min CLOB trades for extended-tier markets.
+                                    # Vol 3K-5K with trades>=75: Sharpe 0.360, 85% WR.
 
     # Price trend filter — skip markets where YES is drifting up (bad for NO)
     # Positive trend means CLOB midpoint > Gamma mid → price rising
@@ -147,7 +156,9 @@ def compute_signals(
     fee_category = cfg.get("fee_category")
     slip = cfg["slippage"]
     min_vol = cfg.get("min_volume", 0.0)
-    max_vol = cfg.get("max_volume", float("inf"))
+    max_vol_core = cfg.get("max_volume", 3000)
+    max_vol_ext = cfg.get("max_volume_extended", 5000)
+    min_trades_ext = cfg.get("min_trades_extended_tier", 75)
     max_edge = cfg.get("max_edge", float("inf"))
     max_trend = cfg.get("max_price_trend", 0.05)
     exclude_cats = set(cfg.get("exclude_categories", []))
@@ -185,10 +196,15 @@ def compute_signals(
         if yes_mid > max_yes or yes_mid < min_yes:
             continue
 
-        # --- Volume filter ---
+        # --- Volume filter (two-tier) ---
         vol = mkt.get("volume", 0)
-        if vol < min_vol or vol > max_vol:
+        if vol < min_vol or vol > max_vol_ext:
             continue
+        if vol > max_vol_core:
+            # Extended tier: only pass if market has enough activity
+            n_trades_live = mkt.get("n_trades", mkt.get("n_trades_proxy", mkt.get("n_bid_levels", 0)))
+            if n_trades_live < min_trades_ext:
+                continue
 
         # --- Price trend filter ---
         price_trend = mkt.get("price_trend")
@@ -210,25 +226,35 @@ def compute_signals(
         br = None
         n_hist = 0
         rate_source = None
-
-        # Transcript word-level rate (highest precision — political LibFrog)
         strike_word = mkt.get("strike_word", "")
+
+        # Priority 1: Speaker-level rate (highest reliability per backtest)
+        sp_rate = find_speaker_rate(speaker, calibration, min_n=min_sp_n)
+        if sp_rate is not None:
+            br = sp_rate["base_rate"]
+            n_hist = sp_rate["n_markets"]
+            rate_source = "speaker"
+
+        # Priority 2: Transcript word-level rate — used when no speaker rate,
+        # OR when it diverges significantly (>10pp) from speaker rate
+        # (the word is unusually common or rare for this speaker)
         if transcript_rates and not transcript_stale and speaker and strike_word:
             tx_rate = find_transcript_rate(
                 speaker, strike_word, transcript_rates,
                 min_events=min_tx_events)
             if tx_rate is not None:
-                br = tx_rate["base_rate"]
-                n_hist = tx_rate["n_events"]
-                rate_source = "transcript"
-
-        # Speaker-level rate (only if no transcript rate)
-        if br is None:
-            sp_rate = find_speaker_rate(speaker, calibration, min_n=min_sp_n)
-            if sp_rate is not None:
-                br = sp_rate["base_rate"]
-                n_hist = sp_rate["n_markets"]
-                rate_source = "speaker"
+                if br is None:
+                    # No speaker rate — use transcript
+                    br = tx_rate["base_rate"]
+                    n_hist = tx_rate["n_events"]
+                    rate_source = "transcript"
+                else:
+                    # Both available — override only if transcript diverges
+                    divergence = abs(tx_rate["base_rate"] - br)
+                    if divergence > 0.10 and tx_rate["n_events"] >= 30:
+                        br = tx_rate["base_rate"]
+                        n_hist = tx_rate["n_events"]
+                        rate_source = "transcript_override"
 
         # Category fallback
         if br is None:
@@ -255,7 +281,7 @@ def compute_signals(
 
         # --- Edge calculation ---
         edge = yes_mid - br
-        if rate_source == "transcript":
+        if rate_source in ("transcript", "transcript_override"):
             edge_min = edge_min_transcript
         elif rate_source == "speaker":
             edge_min = edge_min_sp_high if n_hist >= sp_high_n else edge_min_sp_low
@@ -264,10 +290,19 @@ def compute_signals(
         if edge < edge_min or edge > max_edge:
             continue
 
+        # --- Confidence-scaled Kelly fraction ---
+        kelly_fraction = cfg["kelly_fraction"]  # default
+        tiers = cfg.get("kelly_confidence_tiers")
+        if tiers:
+            for threshold in sorted(tiers.keys(), reverse=True):
+                if n_hist >= threshold:
+                    kelly_fraction = tiers[threshold]
+                    break
+
         # --- Expected PnL and Kelly sizing ---
         epnl, kelly_q = compute_expected_pnl(
             yes_mid, br, fee=fee, slippage=slip,
-            kelly_fraction=cfg["kelly_fraction"],
+            kelly_fraction=kelly_fraction,
             fee_category=fee_category)
 
         signals.append({
@@ -285,6 +320,7 @@ def compute_signals(
             "edge": edge,
             "expected_pnl": epnl,
             "kelly_quarter": kelly_q,
+            "kelly_fraction": kelly_fraction,
             "n_history": n_hist,
             "rate_source": rate_source,
             "volume": mkt.get("volume", 0),

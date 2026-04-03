@@ -298,6 +298,8 @@ def enrich_with_order_book(client, markets: list[dict]) -> list[dict]:
         mkt["no_spread"] = spread
         mkt["total_bid_depth"] = sum(float(b.price) * float(b.size) for b in yes_bids[:10])
         mkt["n_bid_levels"] = len(yes_bids)
+        # Proxy for trade count / market maturity (used by extended volume tier)
+        mkt["n_trades_proxy"] = len(yes_bids)
         # Price trend: CLOB midpoint vs Gamma yes_mid (positive = price drifting up)
         # Only compute if we have both sides of the book
         if best_ask is not None:

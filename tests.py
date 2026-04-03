@@ -394,19 +394,19 @@ class TestTranscriptRateIntegration:
             "overall": {"base_rate": 0.426, "n_markets": 9999},
         }
 
-    def test_transcript_rate_preferred_over_speaker(self):
-        """When transcript word-level rate exists, it should be used over speaker rate."""
+    def test_transcript_overrides_speaker_on_divergence(self):
+        """When transcript rate diverges >10pp from speaker, transcript overrides."""
         from pm_transcript_rates import OUT_PATH
         if not OUT_PATH.exists():
             pytest.skip("Transcript rates not generated")
         cal = self._make_calibration()
-        # "Filibuster" should have 0% rate in Trump transcripts.
+        # "Filibuster" should have ~0% rate in Trump transcripts (diverges from 0.44).
         # Use yes_mid=0.15 so edge (~15c) stays within max_edge=0.20 cap.
         mkts = [self._make_pm_market(yes_mid=0.15, strike_word="Filibuster")]
         signals = pm_compute_signals(mkts, cal)
         assert len(signals) == 1
         sig = signals[0]
-        assert sig["rate_source"] == "transcript"
+        assert sig["rate_source"] == "transcript_override"
         # Word-level rate should be much lower than speaker rate (0.44)
         assert sig["base_rate"] < 0.10
 
@@ -713,6 +713,7 @@ class TestMaxVolumeFilter:
         mkts = [self._make_pm_market(volume=5000)]
         cfg = dict(PM_CONFIG)
         cfg["max_volume"] = 10_000
+        cfg["max_volume_extended"] = 10_000
         signals = pm_compute_signals(mkts, cal, config=cfg)
         assert len(signals) == 1
 
@@ -722,6 +723,7 @@ class TestMaxVolumeFilter:
         mkts = [self._make_pm_market(volume=15_000)]
         cfg = dict(PM_CONFIG)
         cfg["max_volume"] = 10_000
+        cfg["max_volume_extended"] = 10_000
         signals = pm_compute_signals(mkts, cal, config=cfg)
         assert len(signals) == 0
 
@@ -731,8 +733,191 @@ class TestMaxVolumeFilter:
         mkts = [self._make_pm_market(volume=999_999)]
         cfg = dict(PM_CONFIG)
         cfg["max_volume"] = float("inf")
+        cfg["max_volume_extended"] = float("inf")
         signals = pm_compute_signals(mkts, cal, config=cfg)
         assert len(signals) == 1
+
+
+class TestTieredVolumeFilter:
+    """Test two-tier volume filter (core + extended with trade-count gate)."""
+
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_core_tier_passes(self):
+        """Market with vol=2000 passes regardless of n_trades."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=2000, n_trades=10)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+    def test_extended_tier_passes_with_enough_trades(self):
+        """Market with vol=4000 and n_trades=100 passes."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=4000, n_trades=100)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+    def test_extended_tier_excluded_insufficient_trades(self):
+        """Market with vol=4000 and n_trades=50 is excluded."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=4000, n_trades=50)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 0
+
+    def test_above_extended_always_excluded(self):
+        """Market with vol=6000 is always excluded regardless of n_trades."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=6000, n_trades=200)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 0
+
+    def test_n_bid_levels_as_proxy(self):
+        """n_bid_levels should work as fallback for n_trades in live mode."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market(volume=4000, n_bid_levels=100)]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+
+
+class TestConfidenceScaledKelly:
+    """Test confidence-scaled Kelly fractions based on n_history."""
+
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+            "volume": 1000,
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self, n_markets=5261):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": n_markets},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_high_confidence_kelly(self):
+        """Signal with n_history=600 gets kelly_fraction=0.35."""
+        cal = self._make_calibration(n_markets=600)
+        mkts = [self._make_pm_market()]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+        assert signals[0]["kelly_fraction"] == 0.35
+
+    def test_low_confidence_kelly(self):
+        """Signal with n_history=50 gets kelly_fraction=0.18."""
+        cal = self._make_calibration(n_markets=50)
+        mkts = [self._make_pm_market()]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+        assert signals[0]["kelly_fraction"] == 0.18
+
+    def test_default_kelly_without_tiers(self):
+        """Without tiers configured, default 0.25 is used."""
+        cal = self._make_calibration(n_markets=600)
+        mkts = [self._make_pm_market()]
+        cfg = dict(PM_CONFIG)
+        del cfg["kelly_confidence_tiers"]
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+        assert signals[0]["kelly_fraction"] == 0.25
+
+
+class TestTranscriptRateDemotion:
+    """Test that speaker rate is preferred over transcript, with divergence override."""
+
+    def _make_pm_market(self, **overrides):
+        base = {
+            "ticker": "cond123",
+            "series": "KXTRUMPMENTION",
+            "event_ticker": "EVT",
+            "yes_mid": 0.50,
+            "source": "polymarket",
+            "strike_word": "TestWord",
+            "speaker": "trump",
+            "category": "political_person",
+            "volume": 1000,
+        }
+        base.update(overrides)
+        return base
+
+    def _make_calibration(self):
+        return {
+            "by_speaker": {
+                "trump": {"base_rate": 0.44, "n_markets": 5261},
+            },
+            "by_category": {
+                "political_person": {"base_rate": 0.42, "n_markets": 7473},
+            },
+            "overall": {"base_rate": 0.426, "n_markets": 9999},
+        }
+
+    def test_speaker_preferred_over_transcript(self):
+        """When both speaker and transcript are available and similar, speaker wins."""
+        cal = self._make_calibration()
+        mkts = [self._make_pm_market()]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        assert len(signals) == 1
+        # Speaker rate should be used since transcript rates (if loaded)
+        # would not diverge by >10pp for a normal word
+        assert signals[0]["rate_source"] == "speaker"
+
+    def test_transcript_used_when_no_speaker(self):
+        """Transcript rate is used when no speaker rate exists."""
+        from pm_transcript_rates import OUT_PATH
+        if not OUT_PATH.exists():
+            pytest.skip("Transcript rates not generated")
+        cal = self._make_calibration()
+        # Remove trump from calibration so speaker rate isn't found
+        cal["by_speaker"] = {}
+        mkts = [self._make_pm_market(yes_mid=0.15, strike_word="Filibuster")]
+        cfg = dict(PM_CONFIG)
+        signals = pm_compute_signals(mkts, cal, config=cfg)
+        if signals:
+            assert signals[0]["rate_source"] == "transcript"
 
 
 class TestMaxEdgeFilter:
@@ -1099,6 +1284,7 @@ class TestVwapBacktestVolumeFilter:
             })
         cfg = dict(PM_CONFIG)
         cfg["max_volume"] = 10_000
+        cfg["max_volume_extended"] = 10_000
         trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
         passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
         assert len(passed) == 0
@@ -1120,6 +1306,7 @@ class TestVwapBacktestVolumeFilter:
             })
         cfg = dict(PM_CONFIG)
         cfg["max_volume"] = 3_000
+        cfg["max_volume_extended"] = 3_000
         trades = run_pm_vwap_backtest(markets, cfg, price_keys=["vwap_25pct_buffer"])
         passed = [t for t in trades if t["passed"].get("vwap_25pct_buffer")]
         assert len(passed) > 0

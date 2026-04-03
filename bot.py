@@ -372,7 +372,7 @@ def run_cycle(
             _, boosted_kelly = compute_expected_pnl(
                 sig["yes_mid"], effective_br,
                 fee=config.get("fee", 0.0), slippage=config["slippage"],
-                kelly_fraction=config["kelly_fraction"],
+                kelly_fraction=sig.get("kelly_fraction", config["kelly_fraction"]),
                 fee_category=config.get("fee_category"))
             sig["kelly_quarter"] = boosted_kelly
             # Re-size with updated Kelly
