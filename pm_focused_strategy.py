@@ -6,7 +6,7 @@ instead of Kalshi series-level rates. Edge = yes_price - speaker_base_rate.
 Key differences from focused_strategy.py:
 - Base rates from PM historical data (per-speaker), not Kalshi series
 - No political_person exclusion (most PM mentions are political)
-- No fees on Polymarket
+- Low but non-zero fees on Polymarket (mentions: 25% rate, exponent 2)
 - Speaker-level rates with category fallback
 
 Usage:
@@ -30,7 +30,7 @@ from shared import compute_expected_pnl
 # Strategy parameters
 # ---------------------------------------------------------------------------
 PM_CONFIG = {
-    # Edge thresholds — PM has zero fees so lower edge is viable.
+    # Edge thresholds — PM fees are small (~$0.008/contract at typical entry),
     # PM backtest: 4c edge is most profitable by total PnL (N=5612,
     # Sharpe=0.055, CI excludes zero). Tiered by rate quality:
     # - High-N speakers (100+): tighter edge OK (4c), rate is reliable
@@ -75,10 +75,13 @@ PM_CONFIG = {
     # Execution filters
     "max_no_spread": 0.05,          # skip markets with NO spread > 5c
 
-    # Volume filter — NOTE: live volume is in-progress (lower than final),
-    # so this filter is less strict live than in backtest (which uses final volume).
+    # Volume filter — LOAD-BEARING. Markets >$10K volume have ~51% NO rate
+    # (no edge). Markets ≤$10K have ~60% NO rate (all the profit).
+    # Removing this filter collapses the strategy's edge.
+    # NOTE: live volume is in-progress (lower than final), so this filter
+    # is less strict live than in backtest (which uses final volume).
     "min_volume": 0.0,              # minimum volume to consider
-    "max_volume": 10_000,           # skip hyper-liquid markets (arb-dominated)
+    "max_volume": 10_000,           # DO NOT REMOVE — edge only exists in illiquid markets
 
     # Price trend filter — skip markets where YES is drifting up (bad for NO)
     # Positive trend means CLOB midpoint > Gamma mid → price rising

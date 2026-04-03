@@ -2,7 +2,7 @@
 
 *Generated 2026-03-16 22:44 from 10,021 resolved markets (9,468 with CLOB trades, 8,627 with VWAP), 2024-06-27 to 2026-04-30.*
 
-All results use **real VWAP 25% buffer** entry prices from CLOB trade history and **rolling speaker base rates** (no look-ahead). Polymarket has **zero fees**; 1c slippage assumed. Per-trade Sharpe = mean/std.
+All results use **real VWAP 25% buffer** entry prices from CLOB trade history and **rolling speaker base rates** (no look-ahead). PM taker fees included (mentions: 25% rate, exponent 2); 1c slippage assumed. Per-trade Sharpe = mean/std.
 
 ---
 
@@ -201,7 +201,7 @@ Stop trading if:
 
 **Key differences:**
 
-- PM has zero fees → lower edge thresholds are viable (4c vs 8-12c)
+- PM fees are small (~$0.008/contract) → lower edge thresholds viable (4c vs 8-12c)
 - PM mention markets are predominantly political speakers → speaker-level base rates work well
 - Transcript word-level rates provide per-word precision for political speakers (equivalent to LibFrog for earnings)
 - PM data is larger (10K+ resolved markets vs 20K for Kalshi) but concentrated in fewer speakers

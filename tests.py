@@ -1490,6 +1490,15 @@ class TestCalibrationFreshness:
         assert epnl_with_fee < epnl_no_fee
         assert epnl_with_fee > 0  # should still be positive at this edge
 
+    def test_fee_adjusted_kelly_smaller_than_gross(self):
+        """Kelly sizing with fees should be smaller than without fees."""
+        from shared import compute_expected_pnl
+        _, kelly_no_fee = compute_expected_pnl(0.40, 0.20, fee=0.0, slippage=0.01)
+        _, kelly_with_fee = compute_expected_pnl(0.40, 0.20, slippage=0.01,
+                                                   fee_category="mentions")
+        assert kelly_with_fee < kelly_no_fee
+        assert kelly_with_fee > 0
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -16,7 +16,7 @@ Buy NO on Polymarket "mention markets" — binary contracts on whether a public 
 
 ## 2. Backtest Results (Honest VWAP)
 
-All numbers use real CLOB trade history (VWAP with 25% time buffer) as entry prices. Rolling base rates with zero look-ahead. Zero fees (Polymarket). 1c slippage.
+All numbers use real CLOB trade history (VWAP with 25% time buffer) as entry prices. Rolling base rates with zero look-ahead. PM taker fees included (mentions: 25% rate, exponent 2). 1c slippage.
 
 | Metric | Value |
 |---|---|
@@ -297,7 +297,8 @@ PM_CONFIG = {
     "max_total_exposure_pct": 0.80,    # 80% max total exposure
 
     # Costs
-    "fee": 0.0,                        # Polymarket has no fees
+    "fee": 0.0,                        # flat fee override (0 = use fee_category)
+    "fee_category": "mentions",        # PM taker fee schedule (25% rate, exp 2)
     "slippage": 0.01,                  # 1c slippage assumed
 }
 ```

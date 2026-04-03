@@ -158,7 +158,9 @@ def compute_expected_pnl(
     epnl = p_no * eff_yes - base_rate * no_cost - fee
 
     if epnl > 0:
-        b = eff_yes / no_cost if no_cost > 0 else 0
+        # Fee-adjusted Kelly: net win = (eff_yes - fee), net loss = no_cost
+        net_win = eff_yes - fee
+        b = net_win / no_cost if no_cost > 0 else 0
         kelly_full = (p_no * b - base_rate) / b if b > 0 else 0
         kelly_q = max(0.0, kelly_full * kelly_fraction)
     else:

@@ -351,8 +351,9 @@ def generate_report(trades, markets, param_results, cfg):
     vol_note = f" Volume cap: ${max_vol_cfg:,.0f}." if max_vol_cfg != float("inf") else ""
     lines.append("All results use **real VWAP 25% buffer** entry prices from "
                  "CLOB trade history and **rolling speaker base rates** "
-                 "(no look-ahead). Polymarket has **zero fees**; "
-                 f"1c slippage assumed.{vol_note} Per-trade Sharpe = mean/std.")
+                 "(no look-ahead). PM taker fees included (mentions: 25% rate, "
+                 f"exponent 2); 1c slippage assumed.{vol_note} "
+                 "Per-trade Sharpe = mean/std.")
 
     # ===== EXECUTIVE SUMMARY =====
     lines.append("")
@@ -673,7 +674,7 @@ def generate_report(trades, markets, param_results, cfg):
     lines.append("")
     lines.append("**Key differences:**")
     lines.append("")
-    lines.append("- PM has zero fees → lower edge thresholds are viable (4c vs 8-12c)")
+    lines.append("- PM fees are small (~$0.008/contract) → lower edge thresholds viable (4c vs 8-12c)")
     lines.append("- PM mention markets are predominantly political speakers → "
                  "speaker-level base rates work well")
     lines.append("- Transcript word-level rates provide per-word precision for "
